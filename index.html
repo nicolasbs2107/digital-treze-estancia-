@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cardápio digital</title>
+<meta name="description" content="Cardápio digital: monte seu pedido e finalize pelo WhatsApp.">
+<meta name="theme-color" content="#3A060F">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Endereço sem estabelecimento ativo, ou estabelecimento que não carregou.
+     Cobre a página inteira: nada do site é montado por trás. -->
+<div class="tela-tenant" id="tela-tenant" hidden role="alert" aria-live="polite">
+  <div class="tela-tenant-caixa">
+    <div class="icone" aria-hidden="true">🍕</div>
+    <strong id="tenant-titulo"></strong>
+    <p id="tenant-texto"></p>
+    <button type="button" class="btn btn-principal" id="tenant-tentar" hidden>Tentar novamente</button>
+  </div>
+</div>
+
+<!-- ======================= CABEÇALHO ======================= -->
+<header class="topo">
+  <div class="envoltorio hero-conteudo">
+    <div class="marca">
+      <!-- recebe businesses.logo_path quando houver; sem logo, as iniciais do nome -->
+      <span class="marca-selo" id="marca-selo" aria-hidden="true"></span>
+      <!-- preenchido com businesses.name, depois que o domínio resolver a empresa -->
+      <h1 class="marca-nome" id="marca-nome"></h1>
+      <button type="button" class="btn-carrinho-topo" id="abrir-carrinho" aria-label="Ver meu pedido">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 6h16l-1.5 10.5a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7L4 6Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>
+          <path d="M9 6a3 3 0 0 1 6 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/>
+        </svg>
+        <span class="badge" id="carrinho-badge" hidden>0</span>
+      </button>
+    </div>
+
+    <p class="slogan" data-config="slogan"></p>
+
+    <div class="info-linha">
+      <span class="info-item"><span class="nota-estrela" aria-hidden="true">★</span>
+        <strong id="nota-topo">4,5</strong> — <span class="conta-avaliacoes"></span></span>
+      <span class="info-item">📍 <span data-config="cidade"></span></span>
+      <span class="info-item">🕐 <span id="horario-resumo"></span></span>
+    </div>
+
+    <div class="status" id="status" aria-live="polite"></div>
+
+    <div class="acoes-topo">
+      <button type="button" class="btn btn-principal" id="ver-cardapio">Ver cardápio</button>
+      <a class="btn btn-contorno" data-whats href="#" target="_blank" rel="noopener">Falar no WhatsApp</a>
+    </div>
+  </div>
+
+  <!-- Foto do hero (ilustrativa). Trocar em CONFIG.heroImagem. -->
+  <figure class="hero-foto" id="hero-foto" aria-hidden="true"></figure>
+</header>
+
+<!-- ======================= AVISO DE DEMONSTRAÇÃO ======================= -->
+<div class="faixa-demo so-demo">
+  <div class="envoltorio">
+    <span aria-hidden="true">ⓘ</span>
+    <span><b>Cardápio demonstrativo</b> — produtos e valores ilustrativos.</span>
+  </div>
+</div>
+
+<!-- ======================= BUSCA + CATEGORIAS ======================= -->
+<div class="navegador">
+  <div class="envoltorio busca">
+    <div class="busca-campo">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.6"/>
+        <path d="m11 11 3.2 3.2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+      <label class="invisivel" for="campo-busca">Buscar no cardápio</label>
+      <input id="campo-busca" type="search" placeholder="Buscar no cardápio..." autocomplete="off">
+      <button type="button" class="limpar-busca" id="limpar-busca" aria-label="Limpar busca" hidden>×</button>
+    </div>
+  </div>
+  <nav class="categorias" id="rail-categorias" aria-label="Categorias do cardápio"></nav>
+</div>
+
+<!-- ======================= CARDÁPIO ======================= -->
+<main class="cardapio">
+  <div class="envoltorio" id="lista-cardapio"></div>
+</main>
+
+<!-- ======================= SOBRE ======================= -->
+<section class="sobre" id="sobre">
+  <div class="envoltorio">
+    <h2>Sobre a <span data-config="nomeCompleto"></span></h2>
+    <!-- businesses.short_description; some por completo quando não houver -->
+    <p class="sub" id="sobre-descricao" hidden></p>
+
+    <div class="blocos">
+      <div class="bloco">
+        <h3>Avaliação</h3>
+        <div style="display:flex;align-items:baseline;gap:8px">
+          <strong style="font-size:28px;font-family:var(--display)" id="nota-valor">4,5</strong>
+          <span class="nota-estrelas" aria-hidden="true">★★★★☆</span>
+        </div>
+        <p class="opcao-det conta-avaliacoes" style="margin-top:4px"></p>
+        <p class="opcao-det">no Google</p>
+      </div>
+
+      <div class="bloco">
+        <h3>Serviços</h3>
+        <ul class="lista-simples" id="servicos"></ul>
+      </div>
+
+      <div class="bloco">
+        <h3>Horário</h3>
+        <div id="horarios-lista" style="display:grid;gap:7px"></div>
+      </div>
+
+      <!-- Endereço do ESTABELECIMENTO (não tem relação com o endereço de
+           entrega do cliente, que vive no checkout). Some inteiro quando
+           não houver endereço cadastrado. -->
+      <div class="bloco" id="bloco-endereco" hidden>
+        <h3>Endereço</h3>
+        <address class="endereco-linhas" id="endereco-linhas"></address>
+        <a class="link-mapa" id="ver-mapa" href="#" target="_blank" rel="noopener noreferrer" hidden>
+          <span aria-hidden="true">📍</span> Ver no mapa
+        </a>
+      </div>
+    </div>
+
+    <div class="acoes-sobre">
+      <a class="btn btn-principal" data-whats href="#" target="_blank" rel="noopener">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-8.6 15l-1.3 4.7 4.8-1.3A10 10 0 1 0 12 2zm0 2a8 8 0 1 1-4.1 14.9l-.3-.2-2.5.7.7-2.4-.2-.4A8 8 0 0 1 12 4zm-3.3 4c-.2 0-.5 0-.7.4l-.5 1c-.2.5-.1 1.1.2 1.7.6 1.2 1.6 2.4 2.9 3.2 1.3.8 2.2 1 2.9 1 .5 0 1-.2 1.3-.6l.5-.8c.2-.3.1-.6-.1-.7l-1.7-.9c-.3-.1-.5 0-.6.2l-.5.6c-.1.2-.3.2-.5.1-.7-.3-1.4-.8-2-1.6-.2-.2-.1-.4 0-.5l.5-.5c.2-.2.2-.4.1-.6l-.8-1.6c-.1-.3-.3-.4-.5-.4z"/></svg>
+        Falar no WhatsApp
+      </a>
+      <!-- businesses.instagram; some por completo quando não houver -->
+      <a class="btn btn-borda" data-instagram href="#" target="_blank" rel="noopener noreferrer" hidden>
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="3" width="18" height="18" rx="5" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="17.2" cy="6.8" r="1.2" fill="currentColor"/>
+        </svg>
+        <span class="rotulo-insta">Instagram</span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= AVALIAÇÕES ======================= -->
+<section class="avaliacoes">
+  <div class="envoltorio">
+    <h2>Quem conhece, recomenda</h2>
+    <div class="nota-cartao">
+      <div class="nota-numero">4,5</div>
+      <div class="nota-lado">
+        <div class="nota-estrelas" aria-hidden="true">★★★★★</div>
+        <p class="nota-chamada"><span class="conta-avaliacoes"></span> no Google</p>
+        <p class="nota-texto">Nota pública da <span data-config="nomeCompleto"></span> no Google.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= RODAPÉ ======================= -->
+<footer class="rodape">
+  <div class="envoltorio">
+    <p class="marca-nome" data-config="nomeCompleto"></p>
+    <p id="rodape-endereco" style="margin-top:8px" hidden>📍 <span></span></p>
+    <p>💬 <a data-whats href="#" target="_blank" rel="noopener"><span data-config="whatsappExibicao"></span></a></p>
+    <p id="rodape-instagram" hidden>📷 <a data-instagram href="#" target="_blank" rel="noopener noreferrer"><span class="rotulo-insta"></span></a></p>
+    <p class="fino so-demo">Cardápio demonstrativo: produtos, descrições, fotos e valores são ilustrativos e não representam o cardápio oficial da pizzaria. As fotos vêm de banco de imagens de uso livre e serão substituídas pelas imagens da casa.</p>
+    <p class="fino">© <span id="ano"></span> <span data-config="nomeCompleto"></span> · Cardápio digital</p>
+  </div>
+</footer>
+
+<!-- ======================= BARRA FLUTUANTE ======================= -->
+<div class="barra-carrinho" id="barra-carrinho">
+  <button type="button">
+    <span class="resumo">
+      <span class="contador dinheiro" id="barra-contador">0</span>
+      <span><span id="barra-itens">itens</span> no pedido</span>
+    </span>
+    <span class="valor dinheiro" id="barra-valor">R$ 0,00</span>
+  </button>
+</div>
+
+<!-- ======================= MODAIS ======================= -->
+<div class="cortina" id="cortina" hidden></div>
+
+<!-- Produto -->
+<section class="folha folha--produto" id="folha-produto" role="dialog" aria-modal="true" aria-labelledby="produto-titulo" hidden>
+  <div class="folha-puxador"></div>
+  <div class="folha-cabeca">
+    <h2 id="produto-titulo">Monte sua pizza</h2>
+    <button type="button" class="fechar" data-fechar="#folha-produto" aria-label="Fechar">×</button>
+  </div>
+  <div class="folha-corpo" id="produto-corpo"></div>
+  <div class="folha-rodape rodape-produto" id="produto-rodape"></div>
+</section>
+
+<!-- Carrinho -->
+<section class="folha folha--carrinho" id="folha-carrinho" role="dialog" aria-modal="true" aria-labelledby="carrinho-titulo" hidden>
+  <div class="folha-puxador"></div>
+  <div class="folha-cabeca">
+    <h2 id="carrinho-titulo">Seu pedido</h2>
+    <button type="button" class="fechar" data-fechar="#folha-carrinho" aria-label="Fechar">×</button>
+  </div>
+  <div class="folha-corpo" id="carrinho-corpo"></div>
+  <div class="folha-rodape" id="carrinho-rodape"></div>
+</section>
+
+<!-- Confirmação -->
+<section class="folha folha--produto" id="folha-confirma" role="dialog" aria-modal="true" aria-labelledby="confirma-titulo" hidden>
+  <div class="folha-puxador"></div>
+  <div class="folha-cabeca">
+    <h2 id="confirma-titulo">Confirmar</h2>
+    <button type="button" class="fechar" data-fechar="#folha-confirma" aria-label="Fechar">×</button>
+  </div>
+  <div class="folha-corpo"><p id="confirma-texto" style="color:var(--tinta-2)"></p></div>
+  <div class="folha-rodape">
+    <button type="button" class="btn btn-principal btn-bloco" id="confirma-ok">Confirmar</button>
+    <button type="button" class="voltar" style="justify-self:center" data-fechar="#folha-confirma">Manter itens</button>
+  </div>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- SDK do Supabase (CDN) + configuração + camada de dados.
+     data.js precisa vir antes do app.js: é ele quem traduz o banco
+     para o formato que o app consome. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="supabase-config.js"></script>
+<script src="whatsapp.js"></script>
+<script src="data.js"></script>
+
+<!-- Cardápio de desenvolvimento / fallback manual (DATA_SOURCE = "local"). -->
+<script src="menu-data.js"></script>
+
+<script src="app.js"></script>
+</body>
+</html>

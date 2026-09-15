@@ -1,0 +1,45 @@
+# =====================================================================
+# O QUE NÃO SOBE PARA A VERCEL
+# ---------------------------------------------------------------------
+# Tudo o que não está listado aqui vira arquivo público: a raiz do
+# projeto É a raiz do site. Um .sql esquecido na raiz fica baixável por
+# qualquer pessoa em seusite.com.br/arquivo.sql.
+# =====================================================================
+
+# ---- SQL: estrutura do banco, políticas, seed ----
+# Não contêm senha, mas descrevem tabelas, colunas, RLS e RPCs. Não há
+# motivo para servir isso ao público.
+*.sql
+
+# ---- Edge Functions ----
+# Vão para o Supabase (supabase functions deploy), não para a Vercel.
+supabase/
+
+# ---- Builds em arquivo único ----
+# São CÓPIAS do cardápio e do painel, geradas para enviar por e-mail ou
+# abrir sem servidor. Publicá-las criaria um segundo cardápio no ar, em
+# /estancia-treze-cardapio.html, que envelheceria em silêncio.
+estancia-treze-cardapio.html
+admin-estancia-treze.html
+artifact.html
+
+# ---- Documentação interna ----
+COMO-EDITAR.md
+arquitetura.html
+integracao.html
+diagnostico.html
+
+# ---- Configuração de desenvolvimento ----
+# DATA_SOURCE = "local": se subisse, seria um cardápio de mentira no ar.
+supabase-config.preview.js
+
+# ---- Lixo de ferramenta ----
+node_modules/
+.DS_Store
+*.log
+*.zip
+# ---- Ferramentas locais de desenvolvimento ----
+deno.json
+deno.lock
+package.json
+package-lock.json

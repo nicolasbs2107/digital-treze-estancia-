@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Painel — Estância Treze Pizzaria</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#3A060F">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+<!-- ===================== CARREGANDO ===================== -->
+<div class="tela-centro" id="tela-carregando">
+  <div class="girando" aria-hidden="true"></div>
+  <p>Carregando painel...</p>
+</div>
+
+<!-- ===================== LOGIN ===================== -->
+<main class="tela-centro" id="tela-login" hidden>
+  <form class="cartao-login" id="form-login" autocomplete="on">
+    <span class="selo-marca" aria-hidden="true">13</span>
+    <h1>Estância Treze</h1>
+    <p class="sub">Painel administrativo</p>
+
+    <div class="campo">
+      <label for="login-email">E-mail</label>
+      <input id="login-email" type="email" autocomplete="username" required placeholder="voce@exemplo.com">
+    </div>
+
+    <div class="campo">
+      <label for="login-senha">Senha</label>
+      <div class="campo-senha">
+        <input id="login-senha" type="password" autocomplete="current-password" required placeholder="Sua senha">
+        <button type="button" class="olho" id="ver-senha" aria-label="Mostrar senha">Mostrar</button>
+      </div>
+    </div>
+
+    <p class="erro-login" id="erro-login" hidden></p>
+
+    <button type="submit" class="btn btn-principal btn-bloco" id="btn-entrar">Entrar</button>
+    <p class="rodape-login">Acesso restrito. Se você não tem conta, fale com o responsável pelo site.</p>
+  </form>
+</main>
+
+<!-- ===================== PAINEL ===================== -->
+<div id="tela-painel" hidden>
+  <header class="topo-admin">
+    <div class="marca">
+      <span class="selo-marca pequeno" aria-hidden="true">13</span>
+      <div class="marca-texto">
+        <strong id="topo-empresa">—</strong>
+        <small>Painel administrativo</small>
+      </div>
+    </div>
+    <div class="topo-direita">
+      <span class="email" id="topo-email"></span>
+      <button type="button" class="btn btn-fantasma" id="btn-sair">Sair</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="lateral" aria-label="Seções do painel">
+      <button type="button" class="item-menu" data-aba="dashboard" aria-current="true"><span aria-hidden="true">📊</span> Dashboard</button>
+      <button type="button" class="item-menu" data-aba="produtos"><span aria-hidden="true">🍕</span> Produtos</button>
+      <button type="button" class="item-menu" data-aba="categorias"><span aria-hidden="true">🗂️</span> Categorias</button>
+      <button type="button" class="item-menu" data-aba="entrega"><span aria-hidden="true">🚚</span> Entrega</button>
+      <button type="button" class="item-menu" data-aba="horarios"><span aria-hidden="true">🕐</span> Horários</button>
+      <button type="button" class="item-menu" data-aba="dominios"><span aria-hidden="true">🌐</span> Domínios</button>
+      <button type="button" class="item-menu" data-aba="config"><span aria-hidden="true">⚙️</span> Configurações</button>
+    </nav>
+
+    <main class="conteudo" id="conteudo"></main>
+  </div>
+
+  <nav class="barra-inferior" aria-label="Seções do painel">
+    <button type="button" class="item-barra" data-aba="dashboard" aria-current="true"><span aria-hidden="true">📊</span>Início</button>
+    <button type="button" class="item-barra" data-aba="produtos"><span aria-hidden="true">🍕</span>Produtos</button>
+    <button type="button" class="item-barra" data-aba="categorias"><span aria-hidden="true">🗂️</span>Categorias</button>
+    <button type="button" class="item-barra" data-aba="entrega"><span aria-hidden="true">🚚</span>Entrega</button>
+    <button type="button" class="item-barra" data-aba="horarios"><span aria-hidden="true">🕐</span>Horários</button>
+    <button type="button" class="item-barra" data-aba="dominios"><span aria-hidden="true">🌐</span>Domínios</button>
+    <button type="button" class="item-barra" data-aba="config"><span aria-hidden="true">⚙️</span>Ajustes</button>
+  </nav>
+</div>
+
+<!-- ===================== MODAIS ===================== -->
+<div class="cortina" id="cortina" hidden></div>
+
+<section class="folha" id="folha" role="dialog" aria-modal="true" aria-labelledby="folha-titulo" hidden>
+  <div class="folha-puxador"></div>
+  <div class="folha-cabeca">
+    <h2 id="folha-titulo">Produto</h2>
+    <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
+  </div>
+  <div class="folha-corpo" id="folha-corpo"></div>
+  <div class="folha-rodape" id="folha-rodape"></div>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../supabase-config.js"></script>
+<script src="../whatsapp.js"></script>
+<script src="admin.js"></script>
+</body>
+</html>
