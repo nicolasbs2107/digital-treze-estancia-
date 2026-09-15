@@ -543,8 +543,11 @@
             right: 0;
             bottom: 0;
             z-index: 30;
+            /* as colunas seguem a quantidade de itens: acrescentar uma seção no
+     HTML não exige mexer neste número de novo. */
             display: grid;
-            grid-template-columns: repeat(6, 1fr);
+            grid-auto-flow: column;
+            grid-auto-columns: 1fr;
             background: var(--superficie);
             border-top: 1px solid var(--linha);
             padding-bottom: env(safe-area-inset-bottom);
@@ -788,6 +791,76 @@
         .etiqueta.dourada {
             background: rgba(201, 139, 46, .15);
             color: var(--dourado);
+        }
+
+        .etiqueta.viva {
+            background: var(--ok-suave);
+            color: var(--ok);
+        }
+
+        .etiqueta.apagada {
+            background: var(--superficie-2);
+            color: var(--tinta-3);
+        }
+
+        /* ---------- domínios ---------- */
+        .linha-dominio {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            background: var(--superficie);
+            border: 1px solid var(--linha);
+            border-radius: var(--raio);
+            padding: 12px 14px;
+            box-shadow: var(--sombra-1);
+        }
+
+        .linha-dominio.inativo {
+            opacity: .62;
+        }
+
+        .linha-dominio .dominio-texto {
+            min-width: 0;
+        }
+
+        .linha-dominio .endereco {
+            font-weight: 700;
+            font-size: 14.5px;
+            word-break: break-all;
+            line-height: 1.3;
+        }
+
+        .linha-dominio .etiquetas {
+            margin-top: 6px;
+        }
+
+        .linha-dominio .espaco {
+            flex: 1;
+        }
+
+        .linha-dominio .acoes {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .linha-dominio .acoes .btn {
+            padding: 8px 13px;
+            font-size: 13px;
+        }
+
+        @media (max-width:560px) {
+            .linha-dominio .acoes {
+                width: 100%;
+                padding-top: 10px;
+                border-top: 1px solid var(--linha);
+            }
+
+            .linha-dominio .espaco {
+                display: none;
+            }
         }
 
         .acoes-produto {
@@ -1791,6 +1864,8 @@
                     Entrega</button>
                 <button type="button" class="item-menu" data-aba="horarios"><span aria-hidden="true">🕐</span>
                     Horários</button>
+                <button type="button" class="item-menu" data-aba="dominios"><span aria-hidden="true">🌐</span>
+                    Domínios</button>
                 <button type="button" class="item-menu" data-aba="config"><span aria-hidden="true">⚙️</span>
                     Configurações</button>
             </nav>
@@ -1809,6 +1884,8 @@
                     aria-hidden="true">🚚</span>Entrega</button>
             <button type="button" class="item-barra" data-aba="horarios"><span
                     aria-hidden="true">🕐</span>Horários</button>
+            <button type="button" class="item-barra" data-aba="dominios"><span
+                    aria-hidden="true">🌐</span>Domínios</button>
             <button type="button" class="item-barra" data-aba="config"><span
                     aria-hidden="true">⚙️</span>Ajustes</button>
         </nav>
@@ -1848,9 +1925,22 @@
         const SUPABASE_URL = "https://lzvqwvtwyehteofphplj.supabase.co";
         const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Ljx0VpK3-bemlOMsZ8O_vg_Ntj7EP8a";
 
-        /* Empresa deste site. O UUID nunca é escrito à mão: ele é descoberto
-           a partir do slug e reaproveitado nas consultas seguintes. */
-        const BUSINESS_SLUG = "estancia-treze";
+        /* ---------------------------------------------------------------------
+           QUAL EMPRESA ESTE SITE ATENDE
+        
+           Em produção NÃO existe empresa fixa: quem responde isso é o banco,
+           pela RPC public.resolve_business_by_domain(), a partir do endereço
+           que o visitante digitou (window.location.hostname). Um domínio que
+           não esteja cadastrado e ativo em public.business_domains não carrega
+           nada — nunca cai em outra empresa.
+        
+           A constante abaixo é EXCLUSIVA DE DESENVOLVIMENTO. Ela só é lida
+           quando a página está aberta em localhost / 127.0.0.1 / ::1 / file://
+           e nenhum ?loja=SLUG foi informado. Em qualquer endereço publicado
+           ela é ignorada por completo — trocar o valor daqui não muda o site
+           no ar.
+           --------------------------------------------------------------------- */
+        const DEV_BUSINESS_SLUG = "estancia-treze";
 
         /* ---------------------------------------------------------------------
            DATA_SOURCE — de onde vem o cardápio que o cliente vê.
@@ -1972,7 +2062,10 @@
            2. Utilidades e UI         7. Produto (formulário)
            3. Autenticação            8. Fotos (Storage)
            4. Empresa e dados         9. Categorias
-           5. Navegação e dashboard  10. Configurações
+           5. Navegação e dashboard  10. Entrega
+                                     11. Horários
+                                     12. Configurações
+                                     13. Domínios
            ===================================================================== */
         (function () {
             "use strict";
@@ -2008,6 +2101,8 @@
                 entrega: null,          // linha de delivery_settings da empresa
                 zonas: [],              // delivery_zones da empresa
                 entregaCarregada: false,
+                dominios: [],             // business_domains da empresa
+                dominiosCarregados: false,
                 cfgSujo: false,         // Configurações: há alterações não salvas?
                 /* identidade visual: o que está pendente até clicar em Salvar */
                 marca: {
@@ -2259,6 +2354,7 @@
                 else if (aba === "categorias") renderCategorias();
                 else if (aba === "entrega") renderEntrega();
                 else if (aba === "horarios") renderHorarios();
+                else if (aba === "dominios") renderDominios();
                 else if (aba === "config") renderConfig();
                 else renderDashboard();
             }
@@ -4102,6 +4198,381 @@
                 }
             }
 
+            /* ---------- 13. DOMÍNIOS -------------------------------------------
+               Endereços que abrem o cardápio desta empresa. O site público lê essa
+               mesma tabela pela RPC resolve_business_by_domain().
+          
+               Três coisas para ter em mente ao mexer aqui:
+          
+               · A NORMALIZAÇÃO OFICIAL É DO BANCO. Um trigger BEFORE INSERT/UPDATE
+                 roda normalize_business_domain(), que tira esquema, caminho,
+                 porta, usuário, "www." e ponto final. O que existe aqui no
+                 frontend é limpeza visual — o valor que a tela mostra é sempre o
+                 que VOLTOU do banco, nunca o que foi digitado.
+          
+               · `domain` é único no projeto inteiro. Um domínio já usado por outra
+                 empresa é invisível para este usuário (RLS), então o erro não pode
+                 dizer "está na sua lista": diz só que já existe no sistema.
+          
+               · Duas regras do banco mandam no comportamento da tela: no máximo um
+                 is_primary por empresa (índice único parcial) e principal precisa
+                 estar ativo (check). A ordem das operações abaixo existe por causa
+                 delas.
+          
+               Cadastrar aqui NÃO configura DNS nem adiciona o domínio à
+               hospedagem — e também não comprova propriedade. A verificação de
+               propriedade ainda não existe; quando existir, entra como mais uma
+               etiqueta em etiquetasDominio() e um campo na linha, sem mudar o
+               resto desta seção.
+               ------------------------------------------------------------------ */
+            const SUFIXO_HOSPEDAGEM = ".vercel.app";
+            const AVISO_DNS = "O domínio também precisa estar configurado na hospedagem e no DNS para funcionar.";
+            const AVISO_DESATIVAR_PRINCIPAL = "Defina outro domínio como principal antes de desativar este endereço.";
+
+            /* Limpeza APENAS visual, para o usuário ver o que vai gravar. Quem
+               manda é normalize_business_domain(), no banco. */
+            function limparDominio(valor) {
+                let d = String(valor == null ? "" : valor).trim().toLowerCase();
+                d = d.replace(/\s/g, "");
+                if (!d) return "";
+                d = d.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");   // http:// https:// ...
+                d = d.split("/")[0].split("?")[0].split("#")[0];
+                d = d.replace(/^[^@]*@/, "");                    // usuario:senha@
+                d = d.replace(/:[0-9]+$/, "");                   // porta
+                d = d.replace(/\.+$/, "");
+                d = d.replace(/^www\./, "");
+                d = d.replace(/\.+$/, "");
+                return d;
+            }
+
+            const ehHospedagem = (d) => String(d || "").toLowerCase().slice(-SUFIXO_HOSPEDAGEM.length) === SUFIXO_HOSPEDAGEM;
+
+            /* Erros do Postgres viram frase de gente. */
+            function erroDominio(e) {
+                const m = (e && (e.message || e.error_description)) || "";
+                const cod = (e && e.code) || "";
+                if (cod === "23505" || /duplicate key|already exists|unique constraint|unique index/i.test(m)) {
+                    if (/um_primario|is_primary/i.test(m)) {
+                        return "Já existe um domínio principal. Recarregue a página e tente de novo.";
+                    }
+                    return "Este domínio já está cadastrado no sistema.";
+                }
+                if (cod === "23514" || /check constraint/i.test(m)) {
+                    if (/primario_ativo/i.test(m)) return "O domínio principal precisa estar ativo.";
+                    return "Endereço inválido. Use algo como minhaempresa.com.br.";
+                }
+                if (cod === "23502" || /null value in column/i.test(m)) {
+                    return "Informe um endereço válido, como minhaempresa.com.br.";
+                }
+                return mensagemErro(e);
+            }
+
+            /* Principal primeiro, depois os mais antigos. */
+            function ordenarDominios(linhas) {
+                return (linhas || []).slice().sort(function (a, b) {
+                    const pa = a.is_primary === true ? 0 : 1, pb = b.is_primary === true ? 0 : 1;
+                    if (pa !== pb) return pa - pb;
+                    return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+                });
+            }
+
+            /* A empresa vem SEMPRE de estado.empresa.id (descoberto em
+               business_members). Nada aqui aceita business_id de campo, de URL ou
+               de qualquer coisa que o usuário digite. */
+            async function carregarDominios() {
+                const r = await sb.from("business_domains").select("*")
+                    .eq("business_id", estado.empresa.id)
+                    .order("created_at", { ascending: true });
+                if (r.error) throw r.error;
+                estado.dominios = ordenarDominios(r.data || []);
+                estado.dominiosCarregados = true;
+            }
+
+            /* Depois de QUALQUER escrita: a lista na tela é sempre a do banco,
+               nunca um palpite local. */
+            async function recarregarDominios() {
+                await carregarDominios();
+                if (estado.aba === "dominios") renderDominios();
+            }
+
+            function etiquetasDominio(d) {
+                const ativo = d.active !== false;
+                return '<div class="etiquetas">' +
+                    (d.is_primary === true ? '<span class="etiqueta dourada">Principal</span>' : "") +
+                    '<span class="etiqueta ' + (ativo ? "viva" : "apagada") + '">' + (ativo ? "Ativo" : "Inativo") + "</span>" +
+                    "</div>";
+            }
+
+            function linhaDominio(d) {
+                const ativo = d.active !== false;
+                const principal = d.is_primary === true;
+                return '<div class="linha-dominio' + (ativo ? "" : " inativo") + '">' +
+                    '<span class="icone" aria-hidden="true">🌐</span>' +
+                    '<div class="dominio-texto"><div class="endereco">' + esc(d.domain) + "</div>" +
+                    etiquetasDominio(d) + "</div>" +
+                    '<span class="espaco"></span>' +
+                    '<div class="acoes">' +
+                    (principal ? "" :
+                        '<button type="button" class="btn btn-secundario" data-dom-principal="' + esc(d.id) + '">Tornar principal</button>') +
+                    '<button type="button" class="interruptor' + (ativo ? " ligado" : "") + '" data-dom-ativo="' + esc(d.id) + '">' +
+                    '<span class="bolinha"></span>' + (ativo ? "Ativo" : "Inativo") + "</button>" +
+                    (principal ? "" :
+                        '<button type="button" class="btn btn-fantasma" data-dom-excluir="' + esc(d.id) + '">Excluir</button>') +
+                    "</div>" +
+                    "</div>";
+            }
+
+            function renderDominios() {
+                const cabeca = '<div class="cabeca-pagina"><div><h2>Domínios</h2>' +
+                    "<p>Gerencie os endereços que podem abrir seu cardápio.</p></div>" +
+                    '<button type="button" class="btn btn-principal" data-novo-dominio>+ Adicionar domínio</button></div>';
+
+                if (!estado.dominiosCarregados) {
+                    $("#conteudo").innerHTML = cabeca +
+                        '<div class="painel-caixa"><div class="esq esq-linha" style="width:55%"></div>' +
+                        '<div class="esq esq-linha" style="width:30%"></div></div>' +
+                        '<div class="painel-caixa"><div class="esq esq-linha" style="width:45%"></div>' +
+                        '<div class="esq esq-linha" style="width:25%"></div></div>';
+                    carregarDominios()
+                        .then(function () { if (estado.aba === "dominios") renderDominios(); })
+                        .catch(function (e) {
+                            console.error("[admin]", e);
+                            $("#conteudo").innerHTML = cabeca +
+                                '<div class="vazio"><div class="icone">🌐</div><strong>Não foi possível carregar os domínios.</strong>' +
+                                "<p>" + esc(mensagemErro(e)) + "</p>" +
+                                '<button type="button" class="btn btn-principal" data-recarregar-dominios>Tentar novamente</button></div>';
+                        });
+                    return;
+                }
+
+                const lista = estado.dominios;
+                $("#conteudo").innerHTML = cabeca +
+                    (lista.length
+                        ? '<div class="lista">' + lista.map(linhaDominio).join("") + "</div>"
+                        : '<div class="vazio"><div class="icone">🌐</div><strong>Nenhum domínio cadastrado.</strong>' +
+                        "<p>Enquanto não houver um endereço aqui, quem abrir o site vê " +
+                        "“Estabelecimento não encontrado”.</p>" +
+                        '<button type="button" class="btn btn-principal" data-novo-dominio>+ Adicionar domínio</button></div>') +
+                    '<div class="painel-caixa"><h3>Como isso funciona</h3>' +
+                    '<p class="dica">Quem abre um destes endereços cai no cardápio desta empresa. ' +
+                    "O <b>principal</b> é o endereço oficial da casa; os outros continuam funcionando normalmente " +
+                    "enquanto estiverem ativos — dá para manter o endereço da hospedagem e o domínio próprio ao mesmo tempo.</p>" +
+                    '<p class="dica" style="margin-top:8px">' + esc(AVISO_DNS) +
+                    " Cadastrar aqui não faz essa parte, e também não comprova que o domínio é seu.</p>" +
+                    "</div>";
+            }
+
+            /* ---------- adicionar ---------- */
+            function abrirFormDominio() {
+                const primeiro = estado.dominios.length === 0;
+                abrirFolha("Adicionar domínio",
+                    '<div class="campo"><label for="dom-endereco">Domínio *</label>' +
+                    '<input id="dom-endereco" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+                    'maxlength="253" placeholder="minhaempresa.com.br">' +
+                    '<p class="dica">Pode colar do jeito que estiver — <b>https://www.minhaempresa.com.br/</b> ' +
+                    "também serve. O sistema guarda só o endereço.</p></div>" +
+                    /* mesma chave das outras telas do painel, não um checkbox solto */
+                    '<div class="interruptor-linha"><div class="texto">Definir como domínio principal' +
+                    "<small>" + (primeiro
+                        ? "É o primeiro endereço da empresa — normalmente ele é o principal."
+                        : "O domínio principal de hoje passa a ser secundário, e continua ativo.") + "</small></div>" +
+                    '<button type="button" class="chave' + (primeiro ? " ligada" : "") + '" id="dom-principal" ' +
+                    'role="switch" aria-checked="' + (primeiro ? "true" : "false") +
+                    '" aria-label="Definir como domínio principal"></button></div>' +
+                    '<p class="aviso-info" id="dom-dns" hidden>' + esc(AVISO_DNS) + "</p>" +
+                    '<p class="aviso-form" id="erro-dom" hidden></p>',
+                    '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
+                    '<button type="button" class="btn btn-principal" id="salvar-dom">Adicionar domínio</button>');
+
+                const campo = $("#dom-endereco");
+                const dns = $("#dom-dns");
+                const chave = $("#dom-principal");
+                let querPrincipal = primeiro;
+                chave.onclick = function () {
+                    querPrincipal = !querPrincipal;
+                    chave.classList.toggle("ligada", querPrincipal);
+                    chave.setAttribute("aria-checked", String(querPrincipal));
+                };
+                const avaliarDns = function () {
+                    const d = limparDominio(campo.value);
+                    dns.hidden = !d || ehHospedagem(d);
+                };
+                campo.addEventListener("input", avaliarDns);
+                campo.focus();
+
+                $("#salvar-dom").onclick = async function () {
+                    const btn = this;
+                    const erro = $("#erro-dom");
+                    erro.hidden = true;
+                    const limpo = limparDominio(campo.value);
+                    if (!limpo) {
+                        erro.textContent = "Informe o endereço, como minhaempresa.com.br.";
+                        erro.hidden = false; return;
+                    }
+                    ocupado(btn, true);
+                    try {
+                        /* Entra sempre como secundário. Se for para ser o principal, a
+                           troca acontece depois, pelo mesmo caminho de sempre — assim o
+                           índice único do banco nunca vê dois principais ao mesmo tempo. */
+                        const r = await sb.from("business_domains").insert({
+                            business_id: estado.empresa.id,
+                            domain: limpo,
+                            is_primary: false,
+                            active: true
+                        }).select();
+                        if (r.error) throw r.error;
+                        if (!r.data || !r.data.length) throw new Error("Nenhuma linha foi gravada — verifique suas permissões.");
+
+                        const novo = r.data[0];      // já normalizado pelo banco
+                        estado.dominios = ordenarDominios(estado.dominios.concat([novo]));
+
+                        if (querPrincipal) {
+                            try {
+                                await definirPrincipal(novo.id);
+                            } catch (e2) {
+                                console.error("[admin]", e2);
+                                await recarregarDominios();
+                                fecharFolha();
+                                toast("Domínio adicionado, mas não foi possível torná-lo principal: " +
+                                    (e2 && e2.message ? e2.message : erroDominio(e2)), "erro");
+                                return;
+                            }
+                        } else {
+                            await recarregarDominios();
+                        }
+
+                        fecharFolha();
+                        renderDominios();
+                        toast(ehHospedagem(novo.domain)
+                            ? "Domínio adicionado."
+                            : "Domínio adicionado. " + AVISO_DNS);
+                    } catch (e) {
+                        console.error("[admin]", e);
+                        erro.textContent = erroDominio(e);
+                        erro.hidden = false;
+                    } finally { ocupado(btn, false); }
+                };
+            }
+
+            /* ---------- trocar o principal ----------
+               O banco só aceita UM is_primary por empresa, então tirar do atual
+               tem que vir antes de dar ao novo. Se o segundo passo falhar, o
+               primeiro é desfeito: a empresa não pode acabar sem principal
+               nenhum sem que ninguém perceba. */
+            async function definirPrincipal(id) {
+                const alvo = estado.dominios.find((x) => x.id === id);
+                if (!alvo) throw new Error("Domínio não encontrado na lista.");
+                const anterior = estado.dominios.find((x) => x.id !== id && x.is_primary === true) || null;
+
+                if (anterior) {
+                    const r1 = await sb.from("business_domains").update({ is_primary: false })
+                        .eq("id", anterior.id).eq("business_id", estado.empresa.id).select();
+                    if (r1.error) throw r1.error;
+                    if (!r1.data || !r1.data.length) throw new Error("Nenhuma linha foi alterada — verifique suas permissões.");
+                }
+
+                /* O principal precisa estar ativo (regra do banco): se o escolhido
+                   estava inativo, ele é reativado aqui — e o usuário foi avisado
+                   disso antes de confirmar. */
+                const r2 = await sb.from("business_domains").update({ is_primary: true, active: true })
+                    .eq("id", id).eq("business_id", estado.empresa.id).select();
+
+                if (r2.error || !r2.data || !r2.data.length) {
+                    if (anterior) {
+                        const volta = await sb.from("business_domains").update({ is_primary: true })
+                            .eq("id", anterior.id).eq("business_id", estado.empresa.id).select();
+                        if (volta.error || !volta.data || !volta.data.length) {
+                            await recarregarDominios();
+                            const grave = new Error("A troca falhou e o domínio principal anterior não pôde ser restaurado. " +
+                                "Confira a lista e escolha o principal de novo.");
+                            throw grave;
+                        }
+                    }
+                    throw (r2.error || new Error("Nenhuma linha foi alterada — verifique suas permissões."));
+                }
+
+                await recarregarDominios();
+            }
+
+            function pedirPrincipal(id) {
+                const d = estado.dominios.find((x) => x.id === id);
+                if (!d) return;
+                const anterior = estado.dominios.find((x) => x.id !== id && x.is_primary === true) || null;
+                const inativo = d.active === false;
+
+                confirmar("Tornar principal?",
+                    "O endereço " + d.domain + " passa a ser o domínio principal." +
+                    (anterior ? " " + anterior.domain + " vira secundário e continua ativo." : "") +
+                    (inativo ? " Ele também será reativado, porque o domínio principal precisa estar ativo." : ""),
+                    "Tornar principal",
+                    async function () {
+                        try {
+                            await definirPrincipal(id);
+                            toast("Domínio principal atualizado.");
+                        } catch (e) {
+                            console.error("[admin]", e);
+                            throw new Error(e && e.message && /restaurado|permissões|principal/.test(e.message)
+                                ? e.message : erroDominio(e));
+                        }
+                    });
+            }
+
+            /* ---------- ativar / desativar ---------- */
+            async function alternarDominio(id, botao) {
+                const d = estado.dominios.find((x) => x.id === id);
+                if (!d) return;
+                const ativo = d.active !== false;
+
+                /* regra do banco: principal não pode ficar inativo */
+                if (ativo && d.is_primary === true) {
+                    toast(AVISO_DESATIVAR_PRINCIPAL, "erro");
+                    return;
+                }
+
+                botao.disabled = true;
+                const r = await sb.from("business_domains").update({ active: !ativo })
+                    .eq("id", id).eq("business_id", estado.empresa.id).select();
+                botao.disabled = false;
+
+                if (r.error || !r.data || !r.data.length) { toast(erroDominio(r.error), "erro"); return; }
+                try { await recarregarDominios(); }
+                catch (e) { d.active = !ativo; renderDominios(); }
+                toast(ativo
+                    ? "Domínio desativado. Este endereço não abre mais o cardápio."
+                    : "Domínio ativado.");
+            }
+
+            /* ---------- excluir ---------- */
+            function pedirExclusaoDominio(id) {
+                const d = estado.dominios.find((x) => x.id === id);
+                if (!d) return;
+
+                if (d.is_primary === true) {
+                    abrirFolha("Não é possível remover",
+                        '<p style="color:var(--tinta-2)">O endereço <b>' + esc(d.domain) + "</b> é o domínio " +
+                        "<b>principal</b> da empresa.</p>" +
+                        '<p class="aviso-info">Defina outro domínio como principal antes de remover este endereço.</p>',
+                        '<button type="button" class="btn btn-secundario" data-fechar>Entendi</button>');
+                    return;
+                }
+
+                const unico = estado.dominios.length === 1;
+                confirmar("Remover este domínio?",
+                    "Este endereço deixará de localizar o estabelecimento." +
+                    (unico
+                        ? " Ele é o ÚNICO endereço cadastrado: sem ele, nenhum endereço vai abrir o cardápio desta empresa, " +
+                        "e quem tentar verá “Estabelecimento não encontrado”."
+                        : ""),
+                    unico ? "Remover mesmo assim" : "Remover domínio",
+                    async function () {
+                        const r = await sb.from("business_domains").delete()
+                            .eq("id", id).eq("business_id", estado.empresa.id);
+                        if (r.error) throw new Error(erroDominio(r.error));
+                        await recarregarDominios();
+                        toast("Domínio removido.");
+                    });
+            }
+
             /* ---------- EVENTOS GLOBAIS --------------------------------------- */
             function ligarEventos() {
                 $("#form-login").addEventListener("submit", entrar);
@@ -4167,6 +4638,15 @@
                     if (zs) { moverZona(zs.dataset.zonaSubir, -1); return; }
                     const zd = ev.target.closest("[data-zona-descer]");
                     if (zd) { moverZona(zd.dataset.zonaDescer, 1); return; }
+
+                    if (ev.target.closest("[data-novo-dominio]")) { abrirFormDominio(); return; }
+                    if (ev.target.closest("[data-recarregar-dominios]")) { estado.dominiosCarregados = false; renderDominios(); return; }
+                    const dp = ev.target.closest("[data-dom-principal]");
+                    if (dp) { pedirPrincipal(dp.dataset.domPrincipal); return; }
+                    const da = ev.target.closest("[data-dom-ativo]");
+                    if (da) { alternarDominio(da.dataset.domAtivo, da); return; }
+                    const dx = ev.target.closest("[data-dom-excluir]");
+                    if (dx) { pedirExclusaoDominio(dx.dataset.domExcluir); return; }
 
                     const cs = ev.target.closest("[data-subir]");
                     if (cs) { moverCategoria(cs.dataset.subir, -1); return; }

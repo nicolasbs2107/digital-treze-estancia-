@@ -4,9 +4,8 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <title>Estância Treze Pizzaria</title>
-    <meta name="description"
-        content="Cardápio digital da Estância Treze Pizzaria, em Botucatu-SP. Monte sua pizza e finalize o pedido pelo WhatsApp.">
+    <title>Cardápio digital</title>
+    <meta name="description" content="Cardápio digital: monte seu pedido e finalize pelo WhatsApp.">
     <meta name="theme-color" content="#3A060F">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -898,6 +897,63 @@
 
         .cardapio-erro .btn {
             margin-top: 18px;
+        }
+
+        /* ---------------------------------------------------------------------
+   ESTABELECIMENTO NÃO RESOLVIDO
+   Cobre a página inteira. A regra abaixo esconde TODO o resto do body:
+   sem cabeçalho, sem cardápio, sem barra do carrinho, sem rodapé. Assim
+   um domínio que não é de ninguém não mostra pedaço de site nenhum.
+   --------------------------------------------------------------------- */
+        .tela-tenant {
+            position: fixed;
+            inset: 0;
+            z-index: 999;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            background: var(--fundo);
+        }
+
+        .tela-tenant-caixa {
+            width: 100%;
+            max-width: 420px;
+            text-align: center;
+            padding: 30px 22px;
+            border: 1px solid var(--linha);
+            border-radius: var(--raio-g);
+            background: var(--superficie);
+            box-shadow: var(--sombra-1);
+        }
+
+        .tela-tenant .icone {
+            font-size: 30px;
+            opacity: .5;
+        }
+
+        .tela-tenant strong {
+            display: block;
+            margin: 12px 0 6px;
+            font-family: var(--display);
+            font-size: 19px;
+            font-weight: 600;
+        }
+
+        .tela-tenant p {
+            color: var(--tinta-2);
+            font-size: 14.5px;
+        }
+
+        .tela-tenant .btn {
+            margin-top: 18px;
+        }
+
+        body.sem-estabelecimento>*:not(.tela-tenant) {
+            display: none !important;
+        }
+
+        body.sem-estabelecimento {
+            overflow: hidden;
         }
 
         /* preço promocional */
@@ -2148,14 +2204,25 @@
 
 <body>
 
+    <!-- Endereço sem estabelecimento ativo, ou estabelecimento que não carregou.
+     Cobre a página inteira: nada do site é montado por trás. -->
+    <div class="tela-tenant" id="tela-tenant" hidden role="alert" aria-live="polite">
+        <div class="tela-tenant-caixa">
+            <div class="icone" aria-hidden="true">🍕</div>
+            <strong id="tenant-titulo"></strong>
+            <p id="tenant-texto"></p>
+            <button type="button" class="btn btn-principal" id="tenant-tentar" hidden>Tentar novamente</button>
+        </div>
+    </div>
+
     <!-- ======================= CABEÇALHO ======================= -->
     <header class="topo">
         <div class="envoltorio hero-conteudo">
             <div class="marca">
-                <!-- recebe businesses.logo_path quando houver; sem logo, continua o selo "13" -->
-                <span class="marca-selo" id="marca-selo" aria-hidden="true">13</span>
-                <!-- preenchido com businesses.name; a arte do selo "13" não muda -->
-                <h1 class="marca-nome" id="marca-nome">Estância <span>Treze Pizzaria</span></h1>
+                <!-- recebe businesses.logo_path quando houver; sem logo, as iniciais do nome -->
+                <span class="marca-selo" id="marca-selo" aria-hidden="true"></span>
+                <!-- preenchido com businesses.name, depois que o domínio resolver a empresa -->
+                <h1 class="marca-nome" id="marca-nome"></h1>
                 <button type="button" class="btn-carrinho-topo" id="abrir-carrinho" aria-label="Ver meu pedido">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                         <path d="M4 6h16l-1.5 10.5a2 2 0 0 1-2 1.7H7.5a2 2 0 0 1-2-1.7L4 6Z" stroke="currentColor"
@@ -2385,9 +2452,22 @@
         const SUPABASE_URL = "https://lzvqwvtwyehteofphplj.supabase.co";
         const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Ljx0VpK3-bemlOMsZ8O_vg_Ntj7EP8a";
 
-        /* Empresa deste site. O UUID nunca é escrito à mão: ele é descoberto
-           a partir do slug e reaproveitado nas consultas seguintes. */
-        const BUSINESS_SLUG = "estancia-treze";
+        /* ---------------------------------------------------------------------
+           QUAL EMPRESA ESTE SITE ATENDE
+        
+           Em produção NÃO existe empresa fixa: quem responde isso é o banco,
+           pela RPC public.resolve_business_by_domain(), a partir do endereço
+           que o visitante digitou (window.location.hostname). Um domínio que
+           não esteja cadastrado e ativo em public.business_domains não carrega
+           nada — nunca cai em outra empresa.
+        
+           A constante abaixo é EXCLUSIVA DE DESENVOLVIMENTO. Ela só é lida
+           quando a página está aberta em localhost / 127.0.0.1 / ::1 / file://
+           e nenhum ?loja=SLUG foi informado. Em qualquer endereço publicado
+           ela é ignorada por completo — trocar o valor daqui não muda o site
+           no ar.
+           --------------------------------------------------------------------- */
+        const DEV_BUSINESS_SLUG = "estancia-treze";
 
         /* ---------------------------------------------------------------------
            DATA_SOURCE — de onde vem o cardápio que o cliente vê.
@@ -2532,6 +2612,136 @@
                 return sb;
             }
 
+            /* ---------- 1.1 TENANT (de qual empresa é este endereço?) ----------
+               ÚNICO ponto do site que responde essa pergunta. A resposta oficial
+               vem do banco, pela RPC public.resolve_business_by_domain(), a
+               partir de window.location.hostname.
+          
+               O hostname vai CRU para a RPC: quem normaliza (minúsculas, porta,
+               www., ponto final) é public.normalize_business_domain(), do lado do
+               banco. Normalizar também aqui criaria duas regras que podem
+               divergir com o tempo.
+          
+               Três desfechos, e só três:
+          
+                 1 linha  -> { id, slug }. Esse id é o tenant da página, do
+                             carregamento até o WhatsApp. Nada mais o troca.
+                 0 linhas -> ERRO_TENANT_DESCONHECIDO. O site não carrega NADA.
+                             Nunca cai em outra empresa.
+                 falha    -> ERRO_TENANT_INDISPONIVEL (rede, RPC fora do ar,
+                             permissão). Mensagem diferente, também sem fallback.
+          
+               ?loja=SLUG é ferramenta de desenvolvimento e só é lido quando a
+               página está em host local. Em qualquer endereço publicado o
+               parâmetro nem chega a ser consultado.
+               ------------------------------------------------------------------ */
+            const RPC_DOMINIO = "resolve_business_by_domain";
+            const ERRO_TENANT_DESCONHECIDO = "tenant-desconhecido";
+            const ERRO_TENANT_INDISPONIVEL = "tenant-indisponivel";
+
+            function erroTenant(tipo, causa) {
+                const e = new Error(tipo === ERRO_TENANT_DESCONHECIDO
+                    ? "Nenhum estabelecimento ativo para este endereço."
+                    : "Não foi possível resolver o estabelecimento deste endereço.");
+                e.tenant = tipo;
+                if (causa) e.causa = (causa && causa.message) || String(causa);
+                return e;
+            }
+
+            function hostnameAtual() {
+                try {
+                    return (window.location && window.location.hostname) ? String(window.location.hostname) : "";
+                } catch (e) { return ""; }
+            }
+
+            /* Host de desenvolvimento: a máquina de quem está programando.
+               Qualquer outra coisa — inclusive um endereço de teste publicado —
+               é tratada como produção. */
+            function ehHostLocal() {
+                let protocolo = "";
+                try { protocolo = (window.location && window.location.protocol) || ""; } catch (e) { protocolo = ""; }
+                if (protocolo === "file:") return true;           // arquivo aberto direto do disco
+                const h = hostnameAtual().toLowerCase();
+                if (!h) return true;                              // sem hostname: não é um site publicado
+                return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" ||
+                    h === "::1" || h === "[::1]" || /\.localhost$/.test(h);
+            }
+
+            /* Lido SÓ em host local. Em produção esta função nem é chamada. */
+            function slugDeDesenvolvimento() {
+                let slug = "";
+                try {
+                    const p = new URLSearchParams(window.location.search);
+                    slug = (p.get("loja") || "").trim().toLowerCase();
+                } catch (e) { slug = ""; }
+                if (slug && /^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) return slug;
+                return (typeof DEV_BUSINESS_SLUG !== "undefined" && DEV_BUSINESS_SLUG) ? DEV_BUSINESS_SLUG : "";
+            }
+
+            /* Tenant resolvido. Preenchido UMA vez e nunca mais trocado: as
+               reconferências antes do WhatsApp leem daqui, não do endereço nem
+               de nada digitado pelo visitante. */
+            let TENANT = null;
+
+            async function resolverPorDominio(host) {
+                let resposta;
+                try {
+                    resposta = await cliente().rpc(RPC_DOMINIO, { p_hostname: host });
+                } catch (e) {
+                    throw erroTenant(ERRO_TENANT_INDISPONIVEL, e);
+                }
+                if (resposta && resposta.error) throw erroTenant(ERRO_TENANT_INDISPONIVEL, resposta.error);
+                const linhas = Array.isArray(resposta.data) ? resposta.data : (resposta.data ? [resposta.data] : []);
+                const linha = linhas[0];
+                if (!linha || !linha.business_id) throw erroTenant(ERRO_TENANT_DESCONHECIDO);
+                return { id: linha.business_id, slug: linha.slug || "", origem: "dominio", hostname: host };
+            }
+
+            /* Desenvolvimento apenas: descobre o id pelo slug. Não existe caminho
+               que chegue aqui a partir de um endereço publicado. */
+            async function resolverPorSlug(slug) {
+                let resposta;
+                try {
+                    resposta = await cliente().from("businesses").select("id,slug").eq("slug", slug).maybeSingle();
+                } catch (e) {
+                    throw erroTenant(ERRO_TENANT_INDISPONIVEL, e);
+                }
+                if (resposta && resposta.error) throw erroTenant(ERRO_TENANT_INDISPONIVEL, resposta.error);
+                if (!resposta.data || !resposta.data.id) throw erroTenant(ERRO_TENANT_DESCONHECIDO);
+                return { id: resposta.data.id, slug: resposta.data.slug || slug, origem: "dev-slug", hostname: hostnameAtual() };
+            }
+
+            async function resolverTenant() {
+                if (TENANT) return TENANT;
+                const host = hostnameAtual();
+
+                if (ehHostLocal()) {
+                    /* Em desenvolvimento o domínio ainda pode estar cadastrado
+                       (alguém apontou um /etc/hosts): tenta o caminho oficial antes de
+                       usar o slug. Só o "não encontrado" cai para o slug — uma falha
+                       de rede continua sendo falha de rede. */
+                    if (host) {
+                        try { TENANT = await resolverPorDominio(host); return TENANT; }
+                        catch (e) { if (e.tenant !== ERRO_TENANT_DESCONHECIDO) throw e; }
+                    }
+                    const slug = slugDeDesenvolvimento();
+                    if (!slug) throw erroTenant(ERRO_TENANT_DESCONHECIDO);
+                    TENANT = await resolverPorSlug(slug);
+                    return TENANT;
+                }
+
+                TENANT = await resolverPorDominio(host);
+                return TENANT;
+            }
+
+            /* Tenant já resolvido, para as reconferências. Nunca resolve de novo:
+               se por algum motivo não houver tenant, a reconferência falha em vez
+               de sair procurando empresa. */
+            function tenantAtual() {
+                if (!TENANT || !TENANT.id) throw erroTenant(ERRO_TENANT_INDISPONIVEL);
+                return TENANT;
+            }
+
             /* ---------- 2. RELÓGIO DO SERVIDOR --------------------------------
                Ponto ÚNICO de tempo do site: promoções e horário de funcionamento
                leem daqui, nunca de `new Date()` espalhado pelo código.
@@ -2652,10 +2862,13 @@
                 return { preco: normal, precoNormal: normal, emPromocao: false };
             }
 
-            /* ---------- 4. CONSULTAS ------------------------------------------ */
-            async function buscarEmpresa() {
+            /* ---------- 4. CONSULTAS ------------------------------------------
+               Todas filtram por business_id — o id que veio da resolução do
+               domínio. Nenhuma consulta do site público procura empresa por slug.
+               ------------------------------------------------------------------ */
+            async function buscarEmpresa(businessId) {
                 const { data, error } = await cliente()
-                    .from("businesses").select("*").eq("slug", BUSINESS_SLUG).single();
+                    .from("businesses").select("*").eq("id", businessId).single();
                 if (error) throw error;
                 return data;
             }
@@ -3156,18 +3369,20 @@
             }
 
             /* ---------- 7. CARREGAMENTO --------------------------------------- */
-            let idEmpresa = null;   // o slug não muda de dono; guardar evita reconsultas
 
             async function carregar() {
+                /* PRIMEIRO de tudo: de quem é este endereço. Se isso não responder,
+                   nada mais acontece — nem relógio, nem cardápio, nem entrega. */
+                const tenant = await resolverTenant();
+
                 await sincronizarRelogio();          // uma única ida à rede pela hora
                 const instante = agora();
-                const empresa = await buscarEmpresa();
-                idEmpresa = empresa.id;
+                const empresa = await buscarEmpresa(tenant.id);
                 const [linhasCategorias, linhasProdutos, entrega, horarios] = await Promise.all([
-                    buscarCategorias(empresa.id),
-                    buscarProdutos(empresa.id),
-                    buscarEntrega(empresa.id),
-                    buscarHorarios(empresa.id)
+                    buscarCategorias(tenant.id),
+                    buscarProdutos(tenant.id),
+                    buscarEntrega(tenant.id),
+                    buscarHorarios(tenant.id)
                 ]);
 
                 const categorias = mapearCategorias(linhasCategorias);
@@ -3180,6 +3395,7 @@
 
                 return {
                     empresa: empresa,
+                    tenant: Object.assign({}, tenant),
                     EMPRESA: mapearEmpresa(empresa),
                     CATEGORIAS: categorias,
                     MENU: produtos,
@@ -3191,38 +3407,36 @@
                 };
             }
 
+            /* AS TRÊS RECONFERÊNCIAS ABAIXO usam sempre o MESMO business_id que o
+               domínio resolveu no carregamento. Nenhuma delas resolve o tenant de
+               novo, nenhuma delas olha para a URL: o pedido termina na empresa em
+               que começou. */
+
             /* Releitura da empresa, usada na conferência final antes do WhatsApp:
-               o dono pode ter trocado o número no painel com a página aberta.
-               Uma consulta só, pelo slug — nenhuma outra parte do site fala com a
-               tabela `businesses`. */
+               o dono pode ter trocado o número no painel com a página aberta. */
             async function recarregarEmpresa() {
-                const linha = await buscarEmpresa();
-                idEmpresa = linha.id;
+                const linha = await buscarEmpresa(tenantAtual().id);
                 return mapearEmpresa(linha);
             }
 
             /* Releitura leve, usada na conferência final antes do WhatsApp. */
             async function recarregarEntrega() {
-                const empresa = await buscarEmpresa();
-                return buscarEntrega(empresa.id);
+                return buscarEntrega(tenantAtual().id);
             }
 
-            /* Idem para o horário: hora do servidor renovada + tabelas relidas.
-               Se a empresa já foi identificada no carregamento, não repetimos a
-               consulta pelo slug. */
+            /* Idem para o horário: hora do servidor renovada + tabelas relidas. */
             async function recarregarHorarios() {
                 await sincronizarRelogio();
-                if (!idEmpresa) {
-                    try { idEmpresa = (await buscarEmpresa()).id; }
-                    catch (e) {
-                        console.warn("[cardápio] empresa indisponível ao reconferir horários:", (e && e.message) || e);
-                        return horariosIndisponiveis();
-                    }
+                let id;
+                try { id = tenantAtual().id; }
+                catch (e) {
+                    console.warn("[cardápio] empresa indisponível ao reconferir horários:", (e && e.message) || e);
+                    return horariosIndisponiveis();
                 }
                 /* Um relógio que não respondeu NÃO invalida os horários por si só:
                    quem decide se isso impede o pedido é o app, e só quando a casa
                    bloqueia pedidos fora do horário. */
-                return buscarHorarios(idEmpresa);
+                return buscarHorarios(id);
             }
 
             /* ---------- 8. REVALIDAÇÃO DO CARRINHO ----------------------------
@@ -3320,8 +3534,11 @@
             function registrar(dados) {
                 if (typeof DEBUG_CARDAPIO !== "undefined" && !DEBUG_CARDAPIO) return;
                 const empresa = dados.EMPRESA || {};
+                const t = dados.tenant || TENANT || {};
                 console.groupCollapsed("%c[Supabase]", ESTILO + ";font-size:12px");
-                console.log("Empresa:    " + (empresa.nome || BUSINESS_SLUG));
+                console.log("Empresa:    " + (empresa.nome || t.slug || "(sem nome)"));
+                console.log("Tenant:     " + (t.id || "?") + (t.slug ? " · " + t.slug : "") +
+                    " · resolvido por " + (t.origem === "dominio" ? ("domínio " + (t.hostname || "?")) : "slug de desenvolvimento"));
                 console.log("WhatsApp:   " + (empresa.whatsappValido
                     ? empresa.whatsapp + " (" + empresa.whatsappExibicao + ")"
                     : "INVÁLIDO — " + (empresa.whatsappMotivo || "não cadastrado")));
@@ -3361,6 +3578,12 @@
             const api = {
                 cliente: cliente,
                 carregar: carregar,
+                /* tenant */
+                resolverTenant: resolverTenant,
+                tenant: function () { return TENANT ? Object.assign({}, TENANT) : null; },
+                ehHostLocal: ehHostLocal,
+                ERRO_TENANT_DESCONHECIDO: ERRO_TENANT_DESCONHECIDO,
+                ERRO_TENANT_INDISPONIVEL: ERRO_TENANT_INDISPONIVEL,
                 recarregarEmpresa: recarregarEmpresa,
                 recarregarEntrega: recarregarEntrega,
                 recarregarHorarios: recarregarHorarios,
@@ -4108,7 +4331,7 @@
                     : { ok: false, numero: "", exibicao: "", motivo: "" };
                 return {
                     id: null,
-                    slug: (typeof BUSINESS_SLUG !== "undefined") ? BUSINESS_SLUG : "",
+                    slug: (typeof DEV_BUSINESS_SLUG !== "undefined") ? DEV_BUSINESS_SLUG : "",
                     nome: CONFIG.nomeCompleto || "",
                     whatsapp: w.ok ? w.numero : "",
                     whatsappExibicao: w.ok ? w.exibicao : "",
@@ -4147,19 +4370,29 @@
             /* -------------------------------------------------------------------
                LOGO E FAVICON — só trocam a origem da imagem. Nenhuma medida, nenhum
                espaçamento e nenhum posicionamento do cabeçalho muda: a logo entra
-               DENTRO do mesmo selo que hoje mostra o "13", que continua sendo o
-               fallback. Nada aqui é requisito para o cardápio funcionar: se a
-               imagem não carregar, o site segue igual.
+               DENTRO do mesmo selo do cabeçalho. Nada aqui é requisito para o
+               cardápio funcionar: se a imagem não carregar, o site segue igual.
+          
+               O selo não traz mais uma marca escrita no código ("13"): o mesmo
+               arquivo atende empresas diferentes. Sem logo cadastrada, ele mostra
+               as iniciais do nome que veio do banco — e fica VAZIO enquanto a
+               empresa não foi resolvida, para nunca piscar a marca de outra casa.
                ------------------------------------------------------------------- */
-            const SELO_PADRAO = (function () {
-                const el = document.getElementById("marca-selo");
-                return el ? el.textContent.trim() : "";
-            })();
+            function iniciaisDe(nome) {
+                const palavras = String(nome || "").trim().split(/\s+/).filter(function (p) {
+                    return p && !/^(de|da|do|das|dos|e)$/i.test(p);
+                });
+                if (!palavras.length) return "";
+                const letras = palavras.slice(0, 2).map(function (p) {
+                    return Array.from(p)[0] || "";
+                }).join("");
+                return letras.toLocaleUpperCase("pt-BR");
+            }
 
             function seloPadrao() {
                 const selo = $("#marca-selo");
                 if (!selo) return;
-                selo.textContent = SELO_PADRAO;
+                selo.textContent = iniciaisDe(nomeEmpresa());
                 selo.classList.remove("com-logo");
                 selo.setAttribute("aria-hidden", "true");
             }
@@ -4543,6 +4776,58 @@
                     "</div>";
             }
 
+            /* ---------- ESTABELECIMENTO NÃO RESOLVIDO -------------------------
+               Duas situações bem diferentes, com mensagens diferentes:
+          
+                 desconhecido  — o domínio não está cadastrado (ou está inativo).
+                                 Não existe o que carregar. A página inteira sai
+                                 do ar: nada de cardápio, categorias, entrega,
+                                 horários, carrinho, checkout ou WhatsApp. Não há
+                                 "tentar novamente": tentar de novo dá o mesmo.
+                 indisponível  — o banco não respondeu. Os dados existem, só não
+                                 chegaram agora; por isso o botão de repetir.
+          
+               Em nenhum dos dois casos o site carrega outra empresa.
+               ------------------------------------------------------------------ */
+            function mostrarTelaTenant(tipo) {
+                bloqueado = true;
+                MENU = []; CATEGORIAS = []; HORARIOS = null; ENTREGA_CFG = null; EMPRESA = null;
+
+                const tela = $("#tela-tenant");
+                const desconhecido = tipo === "desconhecido";
+                if (tela) {
+                    $("#tenant-titulo").textContent = desconhecido
+                        ? "Estabelecimento não encontrado"
+                        : "Não foi possível carregar o estabelecimento";
+                    $("#tenant-texto").textContent = desconhecido
+                        ? "Este endereço não está associado a nenhum estabelecimento ativo."
+                        : "Tente novamente em alguns instantes.";
+                    $("#tenant-tentar").hidden = desconhecido;
+                    tela.hidden = false;
+                }
+                document.body.classList.add("sem-estabelecimento");
+                /* nada de "Estância Treze" na aba de um domínio que não é dela */
+                document.title = desconhecido ? "Estabelecimento não encontrado" : "Cardápio digital";
+                fecharTudo();
+            }
+
+            function esconderTelaTenant() {
+                const tela = $("#tela-tenant");
+                if (tela) tela.hidden = true;
+                document.body.classList.remove("sem-estabelecimento");
+            }
+
+            /* Antes de saber QUAL empresa é, nenhum nome, número ou cidade pode
+               aparecer na tela. Os valores de menu-data.js são material de
+               desenvolvimento e não têm nada a ver com o domínio acessado. */
+            function limparMarcaAntesDeResolver() {
+                CONFIG.nome = "";
+                CONFIG.nomeCompleto = "";
+                CONFIG.cidade = "";
+                CONFIG.whatsapp = "";
+                CONFIG.whatsappExibicao = "";
+            }
+
             async function montarCardapio() {
                 /* modo local: só entra quando DATA_SOURCE é trocado à mão */
                 if (typeof DATA_SOURCE === "undefined" || DATA_SOURCE !== "supabase") {
@@ -4560,6 +4845,7 @@
                     return;
                 }
 
+                esconderTelaTenant();
                 mostrarEsqueleto();
                 try {
                     const dados = await window.Cardapio.carregar();
@@ -4577,6 +4863,14 @@
                     revalidarCarrinhoSalvo();
                     window.Cardapio.registrar(dados);
                 } catch (e) {
+                    /* O domínio não resolveu: o problema é ANTES do cardápio. Nenhum
+                       dado de empresa nenhuma entra na página. */
+                    if (e && e.tenant) {
+                        console.error("[cardápio] " + e.message + (e.causa ? " — " + e.causa : ""));
+                        mostrarTelaTenant(e.tenant === window.Cardapio.ERRO_TENANT_DESCONHECIDO
+                            ? "desconhecido" : "indisponivel");
+                        return;
+                    }
                     /* nada de cair para os preços locais sem o usuário pedir */
                     bloqueado = true;
                     MENU = [];
@@ -5649,6 +5943,7 @@
                     }
 
                     if (ev.target.closest("#tentar-novamente")) { montarCardapio(); return; }
+                    if (ev.target.closest("#tenant-tentar")) { montarCardapio(); return; }
 
                     if (ev.target.closest("#confirma-ok")) {
                         const cb = aoConfirmar; aoConfirmar = null;
@@ -5743,6 +6038,12 @@
             }
 
             async function iniciar() {
+                /* Ligado ao banco, a identidade da casa só existe depois que o
+                   domínio resolver. Até lá a página fica sem nome, sem número e sem
+                   cidade — é o que impede o "flash" da marca errada. */
+                if (typeof DATA_SOURCE !== "undefined" && DATA_SOURCE === "supabase") {
+                    limparMarcaAntesDeResolver();
+                }
                 preencherTextos();
                 renderHero();
                 renderStatus();
