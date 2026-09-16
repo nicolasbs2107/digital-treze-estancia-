@@ -148,6 +148,14 @@ img{ max-width:100%; display:block; }
   border-radius:10px; font-size:13.5px;
 }
 #form-login .btn{ margin-top:18px; }
+/* a tela de primeiro acesso usa o mesmo cartão do login */
+#form-senha .btn-bloco{ margin-top:18px; }
+.aviso-convite{
+  margin:-4px 0 4px; padding:10px 13px;
+  background:var(--superficie-2); color:var(--tinta-2);
+  border-radius:10px; font-size:12.5px; line-height:1.5; text-align:center;
+}
+.aviso-convite b{ color:var(--tinta); }
 .rodape-login{ margin-top:14px; text-align:center; font-size:12px; color:var(--tinta-3); }
 
 /* ---------- topo ---------- */

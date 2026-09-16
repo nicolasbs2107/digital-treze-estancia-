@@ -46,6 +46,43 @@
   </form>
 </main>
 
+<!-- ===================== PRIMEIRO ACESSO (CONVITE) =====================
+     Mesmo cartão da tela de login: mesmo selo, mesma tipografia, mesmos
+     campos. Só aparece quando o link de convite traz uma sessão válida.
+     ==================================================================== -->
+<main class="tela-centro" id="tela-senha" hidden>
+  <!-- novalidate: a conferência é feita no JS, para a mensagem sair no
+       mesmo estilo do resto do painel em vez do balão do navegador.
+       O required continua, pelos leitores de tela. -->
+  <form class="cartao-login" id="form-senha" autocomplete="on" novalidate>
+    <span class="selo-marca" aria-hidden="true">13</span>
+    <h1>Crie sua senha</h1>
+    <p class="sub">Primeiro acesso</p>
+
+    <p class="aviso-convite" id="senha-email" hidden></p>
+
+    <div class="campo">
+      <label for="nova-senha">Nova senha</label>
+      <div class="campo-senha">
+        <input id="nova-senha" type="password" autocomplete="new-password" required
+               minlength="8" placeholder="Pelo menos 8 caracteres">
+        <button type="button" class="olho" id="ver-nova-senha" aria-label="Mostrar senha">Mostrar</button>
+      </div>
+    </div>
+
+    <div class="campo">
+      <label for="confirmar-senha">Confirmar senha</label>
+      <input id="confirmar-senha" type="password" autocomplete="new-password" required
+             minlength="8" placeholder="Repita a senha">
+    </div>
+
+    <p class="erro-login" id="erro-senha" hidden></p>
+
+    <button type="submit" class="btn btn-principal btn-bloco" id="btn-criar-senha">Criar senha e acessar</button>
+    <p class="rodape-login">É com ela que você vai entrar no painel daqui em diante.</p>
+  </form>
+</main>
+
 <!-- ===================== PAINEL ===================== -->
 <div id="tela-painel" hidden>
   <header class="topo-admin">

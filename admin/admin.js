@@ -29,9 +29,104 @@
   const LOGO_MAX = 1200;                        // px no maior lado
   const FAVICON_LADO = 512;                     // px, sempre quadrado
 
+  /* ---------- 1.1 O QUE VEIO NA URL --------------------------------
+     LIDO ANTES DO createClient, e isso não é estilo: é obrigatório.
+
+     Com detectSessionInUrl ligado, o SDK consome o "#access_token=...
+     &type=invite" assim que é criado e APAGA o fragmento da barra de
+     endereços. Se perguntássemos depois, já não haveria o que ler — e
+     um convite ficaria indistinguível de um login comum.
+
+     Por isso o retrato da URL é tirado aqui, de forma síncrona, antes
+     de qualquer coisa tocar no Supabase.
+
+     O link do convite chega assim:
+       .../admin/#access_token=...&refresh_token=...&type=invite
+     e um link vencido, assim:
+       .../admin/#error=access_denied&error_code=otp_expired&...
+     ------------------------------------------------------------------ */
+  const ENTRADA = (function () {
+    function ler(texto) {
+      try { return new URLSearchParams(String(texto || "").replace(/^[#?]/, "")); }
+      catch (e) { return new URLSearchParams(); }
+    }
+    let hash = new URLSearchParams(), busca = new URLSearchParams();
+    try { hash = ler(window.location.hash); busca = ler(window.location.search); } catch (e) { /* nada */ }
+    const pega = (k) => hash.get(k) || busca.get(k) || "";
+
+    const tipo = pega("type");
+    return {
+      tipo: tipo,
+      /* "recovery" entra junto de propósito: é o link de redefinir senha,
+         que leva à MESMA tela. Sem ele, ligar o detectSessionInUrl abriria
+         um buraco novo — o link de recuperação criaria sessão e jogaria a
+         pessoa direto no painel, sem nunca pedir a senha nova. */
+      primeiroAcesso: tipo === "invite" || tipo === "recovery",
+      temToken: !!(pega("access_token") || pega("code") || pega("token_hash")),
+      /* error e error_code vêm separados e dizem coisas diferentes:
+         error = "access_denied", error_code = "otp_expired". Juntar os
+         dois num campo só perderia justamente o que distingue
+         "expirou" de "inválido". */
+      erro: pega("error"),
+      erroCodigo: pega("error_code"),
+      erroDescricao: pega("error_description"),
+      temErro: !!(pega("error") || pega("error_code"))
+    };
+  })();
+
+  /* detectSessionInUrl: true — é o que permite ao SDK transformar o link
+     do convite em sessão. Sem isso o link abre o painel e não acontece
+     nada. O retrato acima já foi tirado, então nada se perde. */
   const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+    auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
   });
+
+  /* ---------- MARCA DE "AINDA PRECISA CRIAR SENHA" -------------------
+     Guarda o user.id de quem entrou por convite e ainda não definiu a
+     senha.
+
+     POR QUE localStorage E NÃO sessionStorage: a sessão do Supabase é
+     persistente (persistSession: true) e sobrevive ao fechamento da
+     aba. Uma marca em sessionStorage, não — ela some junto com a aba.
+     O resultado seria o pior dos dois mundos: a pessoa fecha a aba na
+     tela "Crie sua senha", reabre /admin/, a sessão ainda está lá, a
+     marca não, e ela entra no painel sem nunca ter criado senha. A
+     marca precisa durar pelo menos o mesmo tanto que a sessão dura.
+
+     POR QUE GUARDA O user.id E NÃO UM "1": o navegador pode ser
+     compartilhado. Uma marca solta faria o próximo usuário a entrar —
+     outra pessoa, com senha já definida — cair na tela de criar senha
+     por causa de um convite alheio que ficou pela metade. Guardando o
+     id, a marca só vale para quem ela é.
+
+     Some em três situações, e só nelas: a senha foi criada, o usuário
+     saiu, ou aquele fluxo foi invalidado de vez.
+     ------------------------------------------------------------------ */
+  const CHAVE_PENDENTE = "estancia13.primeiro-acesso";
+
+  const marcarPendente = (userId) => {
+    if (!userId) return;
+    try { localStorage.setItem(CHAVE_PENDENTE, String(userId)); }
+    catch (e) { /* navegador sem localStorage: segue sem a marca */ }
+  };
+
+  /* Apaga SOMENTE se a marca for daquele usuário. Sem o id não apaga
+     nada: uma marca que não sabemos de quem é pode ser de outra pessoa
+     no meio do primeiro acesso dela. */
+  const limparPendente = (userId) => {
+    if (!userId) return;
+    try {
+      if (localStorage.getItem(CHAVE_PENDENTE) === String(userId)) {
+        localStorage.removeItem(CHAVE_PENDENTE);
+      }
+    } catch (e) { /* nada a fazer */ }
+  };
+
+  const pendenteDe = (userId) => {
+    if (!userId) return false;
+    try { return localStorage.getItem(CHAVE_PENDENTE) === String(userId); }
+    catch (e) { return false; }
+  };
 
   const estado = {
     usuario: null,
@@ -54,7 +149,7 @@
     cfgSujo: false,         // Configurações: há alterações não salvas?
     /* identidade visual: o que está pendente até clicar em Salvar */
     marca: {
-      logo:    { arquivo: null, previa: "", remover: false },
+      logo: { arquivo: null, previa: "", remover: false },
       favicon: { arquivo: null, previa: "", remover: false }
     },
     carregando: false,
@@ -107,7 +202,7 @@
     if (isNaN(d.getTime())) return "";
     const p = (n) => String(n).padStart(2, "0");
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
-           "T" + p(d.getHours()) + ":" + p(d.getMinutes());
+      "T" + p(d.getHours()) + ":" + p(d.getMinutes());
   };
   const deCampoData = (v) => (v ? new Date(v).toISOString() : null);
 
@@ -179,7 +274,140 @@
   function mostrarTela(qual) {
     $("#tela-carregando").hidden = qual !== "carregando";
     $("#tela-login").hidden = qual !== "login";
+    $("#tela-senha").hidden = qual !== "senha";
     $("#tela-painel").hidden = qual !== "painel";
+  }
+
+  /* Tira da barra de endereços tudo que o fluxo de e-mail deixou para
+     trás. O SDK já limpa o fragmento sozinho ao processá-lo; isto é a
+     segunda passada, que também cobre a query e o caso de o SDK não ter
+     mexido (link vencido, por exemplo).
+
+     replaceState e não pushState: o endereço com token não pode ficar no
+     histórico do navegador — "voltar" não deve reabrir um link de acesso. */
+  const PARAMS_DE_AUTH = [
+    "access_token", "refresh_token", "expires_in", "expires_at", "token_type",
+    "type", "provider_token", "provider_refresh_token",
+    "code", "token_hash",
+    "error", "error_code", "error_description"
+  ];
+  function limparUrl() {
+    try {
+      const url = new URL(window.location.href);
+      let mudou = false;
+      PARAMS_DE_AUTH.forEach(function (k) {
+        if (url.searchParams.has(k)) { url.searchParams.delete(k); mudou = true; }
+      });
+      if (url.hash) { url.hash = ""; mudou = true; }
+      if (mudou) {
+        window.history.replaceState(null, document.title, url.pathname + url.search);
+      }
+    } catch (e) { /* URL exótica: melhor não mexer do que quebrar a página */ }
+  }
+
+  /* ---------- 3.1 PRIMEIRO ACESSO (CONVITE) -------------------------
+     O convite já criou a sessão — o SDK cuidou disso. O que falta é a
+     senha: sem ela a pessoa entra hoje e não consegue entrar amanhã.
+     Por isso esta tela vem ANTES do painel, e não depois.
+     ------------------------------------------------------------------ */
+  const MIN_SENHA = 8;
+
+  function telaCriarSenha(usuario) {
+    marcarPendente(usuario && usuario.id);
+    const alvo = $("#senha-email");
+    const email = (usuario && usuario.email) || "";
+    if (email) {
+      alvo.innerHTML = "Você foi convidado como <b>" + esc(email) + "</b>. " +
+        "Defina uma senha para acessar o painel.";
+      alvo.hidden = false;
+    } else {
+      alvo.hidden = true;
+    }
+    $("#erro-senha").hidden = true;
+    $("#nova-senha").value = "";
+    $("#confirmar-senha").value = "";
+    mostrarTela("senha");
+    $("#nova-senha").focus();
+  }
+
+  async function criarSenha(ev) {
+    ev.preventDefault();
+    if (estado.carregando) return;                 // trava contra duplo clique
+
+    const nova = $("#nova-senha").value;
+    const confirma = $("#confirmar-senha").value;
+    const btn = $("#btn-criar-senha");
+    const erro = $("#erro-senha");
+    erro.hidden = true;
+
+    const reclamar = function (texto, campo) {
+      erro.textContent = texto; erro.hidden = false;
+      if (campo) campo.focus();
+    };
+
+    if (!nova || !confirma) return reclamar("Preencha os dois campos.", !nova ? $("#nova-senha") : $("#confirmar-senha"));
+    if (nova.length < MIN_SENHA) return reclamar("A senha precisa ter pelo menos " + MIN_SENHA + " caracteres.", $("#nova-senha"));
+    if (nova !== confirma) return reclamar("As senhas não são iguais.", $("#confirmar-senha"));
+
+    estado.carregando = true; ocupado(btn, true);
+    try {
+      /* SOMENTE isto. É o próprio usuário, com a sessão dele, mudando a
+         própria senha — nada de Admin API, nada de service_role, nada de
+         chave secreta no navegador. */
+      const { data, error } = await sb.auth.updateUser({ password: nova });
+      if (error) throw error;
+
+      $("#nova-senha").value = ""; $("#confirmar-senha").value = "";
+      limparPendente((data && data.user && data.user.id) ||
+        (estado.usuario && estado.usuario.id));
+      limparUrl();                                  // tokens fora da barra de endereços
+
+      /* A sessão continua valendo: daqui segue o caminho normal, que
+         descobre a empresa por business_members. Nenhum business_id é
+         escrito no código. */
+      if (data && data.user) estado.usuario = data.user;
+      await iniciarSessao();
+    } catch (e) {
+      console.error("[admin]", e);
+      const m = (e && e.message) || "";
+      if (/session|jwt|expired|not authenticated|Auth session missing/i.test(m)) {
+        /* a sessão do convite venceu enquanto a pessoa digitava: este
+           fluxo não vai se concluir, então a marca dele sai */
+        limparPendente(estado.usuario && estado.usuario.id);
+        limparUrl();
+        await sb.auth.signOut().catch(function () { /* já estava fora */ });
+        mostrarTela("login");
+        const el = $("#erro-login");
+        el.textContent = "Seu link de acesso expirou antes de a senha ser salva. Peça um novo convite ao responsável pelo site.";
+        el.hidden = false;
+        return;
+      }
+      reclamar(
+        /at least|should be at least|weak|password/i.test(m)
+          ? "Essa senha não foi aceita. Use pelo menos " + MIN_SENHA + " caracteres."
+          : mensagemErro(e),
+        $("#nova-senha")
+      );
+    } finally {
+      estado.carregando = false; ocupado(btn, false);
+    }
+  }
+
+  /* Link de convite que não vale mais: mensagem de gente, e volta para o
+     login — nunca uma tela em branco ou um erro técnico do Supabase. */
+  function conviteInvalido() {
+    /* Sem sessão não há id — e apagar a marca "no escuro" poderia
+       liberar o painel para outra pessoa que está no meio do primeiro
+       acesso dela. Aqui só limpamos a URL e voltamos ao login. */
+    limparUrl();
+    mostrarTela("login");
+    const el = $("#erro-login");
+    const venceu = ENTRADA.erroCodigo === "otp_expired" ||
+      /expired|expirou/i.test(ENTRADA.erroCodigo + " " + (ENTRADA.erroDescricao || ""));
+    el.textContent = venceu
+      ? "Este link de convite expirou. Peça um novo ao responsável pelo site."
+      : "Este link de acesso não é mais válido. Peça um novo convite ao responsável pelo site.";
+    el.hidden = false;
   }
 
   async function entrar(ev) {
@@ -206,7 +434,7 @@
       erro.textContent = /Invalid login|invalid_credentials/i.test(m)
         ? "E-mail ou senha incorretos. Confira e tente de novo."
         : /Email not confirmed/i.test(m) ? "Este e-mail ainda não foi confirmado."
-        : mensagemErro(e);
+          : mensagemErro(e);
       erro.hidden = false;
       $("#login-senha").focus();
     } finally {
@@ -215,7 +443,9 @@
   }
 
   async function sair() {
+    const quemSaiu = estado.usuario && estado.usuario.id;
     await sb.auth.signOut();
+    limparPendente(quemSaiu);
     estado.usuario = null; estado.empresa = null;
     estado.produtos = []; estado.categorias = [];
     estado.entrega = null; estado.zonas = []; estado.entregaCarregada = false;
@@ -321,19 +551,19 @@
       '<h2 class="saudacao">Olá, ' + esc(nome) + " 👋</h2>" +
       "<p>Aqui você cuida do cardápio que aparece para os clientes.</p>" +
       '<div class="cartoes">' +
-        cartao("Produtos cadastrados", c.total, "") +
-        cartao("Produtos disponíveis", c.disponiveis, "disponivel") +
-        cartao("Produtos esgotados", c.esgotados, "esgotado") +
-        cartao("Produtos em destaque", c.destaques, "destaque") +
+      cartao("Produtos cadastrados", c.total, "") +
+      cartao("Produtos disponíveis", c.disponiveis, "disponivel") +
+      cartao("Produtos esgotados", c.esgotados, "esgotado") +
+      cartao("Produtos em destaque", c.destaques, "destaque") +
       "</div>" +
       '<div class="atalhos">' +
-        '<button type="button" class="btn btn-principal" id="atalho-novo">+ Novo produto</button>' +
-        '<button type="button" class="btn btn-secundario" data-aba-ir="produtos">Gerenciar produtos</button>' +
+      '<button type="button" class="btn btn-principal" id="atalho-novo">+ Novo produto</button>' +
+      '<button type="button" class="btn btn-secundario" data-aba-ir="produtos">Gerenciar produtos</button>' +
       "</div>" +
       '<div class="painel-caixa"><h3>Como funciona</h3>' +
-        '<p class="dica">Tudo o que você mudar aqui aparece no cardápio assim que a página do cliente for recarregada. ' +
-        'Marcar um produto como esgotado não apaga nada — ele volta com um toque. ' +
-        'Produtos em destaque aparecem na aba “Mais pedidas”.</p></div>';
+      '<p class="dica">Tudo o que você mudar aqui aparece no cardápio assim que a página do cliente for recarregada. ' +
+      'Marcar um produto como esgotado não apaga nada — ele volta com um toque. ' +
+      'Produtos em destaque aparecem na aba “Mais pedidas”.</p></div>';
 
     $("#atalho-novo").onclick = () => abrirFormProduto(null);
   }
@@ -366,22 +596,24 @@
   function renderProdutos() {
     $("#conteudo").innerHTML =
       '<div class="cabeca-pagina"><div><h2>Produtos</h2><p>' + estado.produtos.length +
-        " cadastrado(s) nesta empresa</p></div>" +
-        '<button type="button" class="btn btn-principal" data-novo-produto>+ Novo produto</button></div>' +
+      " cadastrado(s) nesta empresa</p></div>" +
+      '<button type="button" class="btn btn-principal" data-novo-produto>+ Novo produto</button></div>' +
 
       '<div class="filtros" id="filtros-produtos">' +
-        '<div class="busca-caixa"><span class="lupa" aria-hidden="true">⌕</span>' +
-          '<label class="invisivel" for="busca-prod">Buscar pelo nome</label>' +
-          '<input class="entrada" id="busca-prod" type="search" autocomplete="off" placeholder="Buscar pelo nome..." value="' + esc(estado.filtro.texto) + '"></div>' +
-        '<select class="entrada" id="filtro-cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>' +
-          estado.categorias.map((c) => '<option value="' + c.id + '"' +
-            (estado.filtro.categoria === c.id ? " selected" : "") + ">" + esc(c.name || c.nome) + "</option>").join("") +
-        "</select>" +
-        '<select class="entrada" id="filtro-status" aria-label="Filtrar por situação">' +
-          ["todos:Todos", "disponiveis:Disponíveis", "esgotados:Esgotados", "destaques:Destaques"]
-            .map(function (o) { const partes = o.split(":");
-              return '<option value="' + partes[0] + '"' + (estado.filtro.status === partes[0] ? " selected" : "") + ">" + partes[1] + "</option>"; }).join("") +
-        "</select>" +
+      '<div class="busca-caixa"><span class="lupa" aria-hidden="true">⌕</span>' +
+      '<label class="invisivel" for="busca-prod">Buscar pelo nome</label>' +
+      '<input class="entrada" id="busca-prod" type="search" autocomplete="off" placeholder="Buscar pelo nome..." value="' + esc(estado.filtro.texto) + '"></div>' +
+      '<select class="entrada" id="filtro-cat" aria-label="Filtrar por categoria"><option value="">Todas as categorias</option>' +
+      estado.categorias.map((c) => '<option value="' + c.id + '"' +
+        (estado.filtro.categoria === c.id ? " selected" : "") + ">" + esc(c.name || c.nome) + "</option>").join("") +
+      "</select>" +
+      '<select class="entrada" id="filtro-status" aria-label="Filtrar por situação">' +
+      ["todos:Todos", "disponiveis:Disponíveis", "esgotados:Esgotados", "destaques:Destaques"]
+        .map(function (o) {
+          const partes = o.split(":");
+          return '<option value="' + partes[0] + '"' + (estado.filtro.status === partes[0] ? " selected" : "") + ">" + partes[1] + "</option>";
+        }).join("") +
+      "</select>" +
       "</div>" +
 
       '<div id="lista-produtos"></div>';
@@ -412,8 +644,8 @@
     alvo.innerHTML = lista.length
       ? '<div class="lista">' + lista.map(linhaProduto).join("") + "</div>"
       : '<div class="vazio"><div class="icone">🍕</div><strong>Nenhum produto encontrado.</strong>' +
-        "<p>" + (estado.produtos.length ? "Tente mudar a busca ou os filtros." : "Cadastre o primeiro produto do cardápio.") + "</p>" +
-        (estado.produtos.length ? "" : '<button type="button" class="btn btn-principal" data-novo-produto>+ Novo produto</button>') + "</div>";
+      "<p>" + (estado.produtos.length ? "Tente mudar a busca ou os filtros." : "Cadastre o primeiro produto do cardápio.") + "</p>" +
+      (estado.produtos.length ? "" : '<button type="button" class="btn btn-principal" data-novo-produto>+ Novo produto</button>') + "</div>";
 
     /* foto que não carrega vira o ícone — nunca fica imagem quebrada */
     $$(".linha-produto .foto img", alvo).forEach(function (img) {
@@ -430,22 +662,22 @@
         ? '<img src="' + esc(p.image_url) + '" alt="" loading="lazy">'
         : '<span aria-hidden="true">🍕</span>') + "</div>" +
       "<div>" +
-        '<div class="nome">' + esc(p.name) + "</div>" +
-        '<div class="meta">' + esc(cat ? (cat.name || cat.nome) : "Sem categoria") +
-          " · <b>" + money(precoInicial(p)) + "</b>" + (tamanhos ? " · " + tamanhos + " tamanhos" : "") + "</div>" +
-        '<div class="etiquetas">' +
-          (p.featured ? '<span class="etiqueta dourada">Destaque</span>' : "") +
-          (tamanhos ? '<span class="etiqueta">Com tamanhos</span>' : '<span class="etiqueta">Preço único</span>') +
-        "</div>" +
+      '<div class="nome">' + esc(p.name) + "</div>" +
+      '<div class="meta">' + esc(cat ? (cat.name || cat.nome) : "Sem categoria") +
+      " · <b>" + money(precoInicial(p)) + "</b>" + (tamanhos ? " · " + tamanhos + " tamanhos" : "") + "</div>" +
+      '<div class="etiquetas">' +
+      (p.featured ? '<span class="etiqueta dourada">Destaque</span>' : "") +
+      (tamanhos ? '<span class="etiqueta">Com tamanhos</span>' : '<span class="etiqueta">Preço único</span>') +
+      "</div>" +
       "</div>" +
       '<div class="acoes-produto">' +
-        '<button type="button" class="interruptor' + (disp ? " ligado" : "") + '" data-toggle="' + p.id + '">' +
-          '<span class="bolinha"></span>' + (disp ? "Disponível" : "Esgotado") + "</button>" +
-        '<span class="espaco"></span>' +
-        '<button type="button" class="btn btn-secundario" data-editar="' + p.id + '">Editar</button>' +
-        '<button type="button" class="btn btn-fantasma" data-excluir="' + p.id + '">Excluir</button>' +
+      '<button type="button" class="interruptor' + (disp ? " ligado" : "") + '" data-toggle="' + p.id + '">' +
+      '<span class="bolinha"></span>' + (disp ? "Disponível" : "Esgotado") + "</button>" +
+      '<span class="espaco"></span>' +
+      '<button type="button" class="btn btn-secundario" data-editar="' + p.id + '">Editar</button>' +
+      '<button type="button" class="btn btn-fantasma" data-excluir="' + p.id + '">Excluir</button>' +
       "</div>" +
-    "</article>";
+      "</article>";
   }
 
   async function alternarDisponibilidade(id, botao) {
@@ -519,36 +751,36 @@
 
   function corpoFormProduto() {
     return '<div class="campo"><label for="f-nome">Nome do produto *</label>' +
-        '<input id="f-nome" type="text" maxlength="80" placeholder="Ex.: Pizza Calabresa" value="' + esc(form.nome) + '"></div>' +
+      '<input id="f-nome" type="text" maxlength="80" placeholder="Ex.: Pizza Calabresa" value="' + esc(form.nome) + '"></div>' +
 
       '<div class="campo"><label for="f-desc">Descrição</label>' +
-        '<textarea id="f-desc" maxlength="220" placeholder="Ingredientes principais">' + esc(form.descricao) + "</textarea></div>" +
+      '<textarea id="f-desc" maxlength="220" placeholder="Ingredientes principais">' + esc(form.descricao) + "</textarea></div>" +
 
       '<div class="campo"><label for="f-cat">Categoria *</label><select id="f-cat">' +
-        (estado.categorias.length ? "" : '<option value="">Cadastre uma categoria primeiro</option>') +
-        estado.categorias.map((c) => '<option value="' + c.id + '"' + (form.categoria === c.id ? " selected" : "") +
-          ">" + esc(c.name || c.nome) + "</option>").join("") + "</select></div>" +
+      (estado.categorias.length ? "" : '<option value="">Cadastre uma categoria primeiro</option>') +
+      estado.categorias.map((c) => '<option value="' + c.id + '"' + (form.categoria === c.id ? " selected" : "") +
+        ">" + esc(c.name || c.nome) + "</option>").join("") + "</select></div>" +
 
       '<div class="bloco-form" id="bloco-foto"><h4>Foto do produto</h4>' + editorFoto() + "</div>" +
 
       '<div class="bloco-form"><h4>Como este produto é vendido</h4>' +
-        '<div class="escolha-tipo">' +
-          '<button type="button" class="opcao-tipo' + (form.tipo === "simples" ? " ativa" : "") + '" data-tipo="simples">Produto simples<small>um preço só</small></button>' +
-          '<button type="button" class="opcao-tipo' + (form.tipo === "tamanhos" ? " ativa" : "") + '" data-tipo="tamanhos">Com tamanhos<small>broto, média...</small></button>' +
-        "</div>" +
-        '<div id="area-precos">' + areaPrecos() + "</div>" +
+      '<div class="escolha-tipo">' +
+      '<button type="button" class="opcao-tipo' + (form.tipo === "simples" ? " ativa" : "") + '" data-tipo="simples">Produto simples<small>um preço só</small></button>' +
+      '<button type="button" class="opcao-tipo' + (form.tipo === "tamanhos" ? " ativa" : "") + '" data-tipo="tamanhos">Com tamanhos<small>broto, média...</small></button>' +
+      "</div>" +
+      '<div id="area-precos">' + areaPrecos() + "</div>" +
       "</div>" +
 
       '<div class="bloco-form"><h4>Bordas</h4><div id="lista-bordas">' + listaOpcionais("bordas") + "</div>" +
-        '<button type="button" class="add-item" data-add="bordas">+ Adicionar borda</button>' +
-        '<p class="aviso-info">Sem nenhuma borda cadastrada, a seção não aparece para o cliente.</p></div>' +
+      '<button type="button" class="add-item" data-add="bordas">+ Adicionar borda</button>' +
+      '<p class="aviso-info">Sem nenhuma borda cadastrada, a seção não aparece para o cliente.</p></div>' +
 
       '<div class="bloco-form"><h4>Adicionais</h4><div id="lista-adicionais">' + listaOpcionais("adicionais") + "</div>" +
-        '<button type="button" class="add-item" data-add="adicionais">+ Adicionar adicional</button></div>' +
+      '<button type="button" class="add-item" data-add="adicionais">+ Adicionar adicional</button></div>' +
 
       '<div class="bloco-form"><h4>Exibição no cardápio</h4>' +
-        chaveLinha("destaque", "Produto em destaque", "Aparece na aba “Mais pedidas”", form.destaque) +
-        chaveLinha("disponivel", "Disponível", "Desligado, aparece como esgotado e não pode ser pedido", form.disponivel) +
+      chaveLinha("destaque", "Produto em destaque", "Aparece na aba “Mais pedidas”", form.destaque) +
+      chaveLinha("disponivel", "Disponível", "Desligado, aparece como esgotado e não pode ser pedido", form.disponivel) +
       "</div>" +
 
       '<p class="aviso-form" id="erro-form" hidden></p>';
@@ -557,12 +789,12 @@
   function editorFoto() {
     return '<div class="foto-editor">' +
       '<div class="foto-previa" id="previa">' +
-        (form.imagemUrl ? '<img src="' + esc(form.imagemUrl) + '" alt="">' : '<span aria-hidden="true">📷</span>') + "</div>" +
+      (form.imagemUrl ? '<img src="' + esc(form.imagemUrl) + '" alt="">' : '<span aria-hidden="true">📷</span>') + "</div>" +
       '<div class="foto-acoes">' +
-        '<input type="file" id="arquivo-foto" accept="image/png,image/jpeg,image/webp">' +
-        '<button type="button" class="btn btn-secundario" id="escolher-foto">' + (form.imagemUrl ? "Trocar foto" : "Escolher foto") + "</button>" +
-        (form.imagemUrl ? '<button type="button" class="btn btn-fantasma" id="tirar-foto">Remover foto</button>' : "") +
-        '<span class="dica">JPG, PNG ou WebP, até 8 MB.<br>Sem foto, o cardápio usa a ilustração.</span>' +
+      '<input type="file" id="arquivo-foto" accept="image/png,image/jpeg,image/webp">' +
+      '<button type="button" class="btn btn-secundario" id="escolher-foto">' + (form.imagemUrl ? "Trocar foto" : "Escolher foto") + "</button>" +
+      (form.imagemUrl ? '<button type="button" class="btn btn-fantasma" id="tirar-foto">Remover foto</button>' : "") +
+      '<span class="dica">JPG, PNG ou WebP, até 8 MB.<br>Sem foto, o cardápio usa a ilustração.</span>' +
       "</div></div>";
   }
 
@@ -571,7 +803,7 @@
       return '<div class="duas" style="margin-top:12px">' +
         '<div class="campo"><label for="f-preco">Preço *</label><input id="f-preco" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(form.preco)) + '"></div>' +
         '<div class="campo"><label for="f-promo">Preço promocional</label><input id="f-promo" inputmode="decimal" placeholder="opcional" value="' + esc(precoTexto(form.promo)) + '"></div>' +
-      "</div>" + janelaPromo();
+        "</div>" + janelaPromo();
     }
     return '<div style="margin-top:12px">' +
       form.tamanhos.map(function (t, i) {
@@ -584,7 +816,7 @@
           '<button type="button" class="remover-item" data-remove-tam="' + i + '" aria-label="Remover tamanho">×</button></div>';
       }).join("") +
       '<button type="button" class="add-item" data-add="tamanho">+ Adicionar tamanho</button>' +
-    "</div>" + janelaPromo();
+      "</div>" + janelaPromo();
   }
 
   function janelaPromo() {
@@ -750,7 +982,7 @@
   async function enviarFoto(file) {
     const blob = await redimensionar(file);
     const ext = (blob.type && blob.type.indexOf("webp") >= 0) ? "webp"
-              : (file.type.indexOf("png") >= 0 ? "png" : "jpg");
+      : (file.type.indexOf("png") >= 0 ? "png" : "jpg");
     /* pasta da empresa — as políticas do bucket conferem este primeiro nível */
     const caminho = estado.empresa.id + "/" +
       Date.now() + "-" + Math.random().toString(36).slice(2, 8) + "." + ext;
@@ -800,8 +1032,10 @@
       if (!validos.length) return mostrar("Cadastre pelo menos um tamanho com nome e preço.");
       const ids = idsUnicos(validos);
       sizes = validos.map(function (t, i) {
-        return { id: ids[i], name: t.nome.trim(), detail: (t.detalhe || "").trim(),
-                 price: numeroOuNulo(t.preco), promo_price: numeroOuNulo(t.promo) };
+        return {
+          id: ids[i], name: t.nome.trim(), detail: (t.detalhe || "").trim(),
+          price: numeroOuNulo(t.preco), promo_price: numeroOuNulo(t.promo)
+        };
       });
       const ruim = sizes.find((x) => x.promo_price != null && x.promo_price >= x.price);
       if (ruim) return mostrar("O preço promocional de " + ruim.name + " precisa ser menor que o preço normal.");
@@ -883,28 +1117,28 @@
   function renderCategorias() {
     $("#conteudo").innerHTML =
       '<div class="cabeca-pagina"><div><h2>Categorias</h2><p>Ordem e nomes das abas do cardápio</p></div>' +
-        '<button type="button" class="btn btn-principal" id="nova-cat">+ Nova categoria</button></div>' +
+      '<button type="button" class="btn btn-principal" id="nova-cat">+ Nova categoria</button></div>' +
       (estado.categorias.length
         ? '<div class="lista">' + estado.categorias.map(function (c, i) {
-            const qtd = produtosDaCategoria(c.id);
-            const ativa = c.active !== false;
-            return '<div class="linha-categoria' + (ativa ? "" : " inativa") + '">' +
-              '<span class="icone" aria-hidden="true">' + esc(c.icon || "🍕") + "</span>" +
-              '<div><div class="nome">' + esc(c.name || c.nome) + "</div>" +
-              '<div class="contagem">' + qtd + " produto(s)" + (ativa ? "" : " · oculta no cardápio") + "</div></div>" +
-              '<span class="espaco"></span>' +
-              '<div class="setas">' +
-                '<button type="button" class="seta" data-subir="' + c.id + '"' + (i === 0 ? " disabled" : "") + ' aria-label="Subir">↑</button>' +
-                '<button type="button" class="seta" data-descer="' + c.id + '"' + (i === estado.categorias.length - 1 ? " disabled" : "") + ' aria-label="Descer">↓</button>' +
-              "</div>" +
-              '<button type="button" class="interruptor' + (ativa ? " ligado" : "") + '" data-cat-ativa="' + c.id + '">' +
-                '<span class="bolinha"></span>' + (ativa ? "Ativa" : "Oculta") + "</button>" +
-              '<button type="button" class="btn btn-secundario" data-cat-editar="' + c.id + '">Editar</button>' +
-              '<button type="button" class="btn btn-fantasma" data-cat-excluir="' + c.id + '">Excluir</button>' +
+          const qtd = produtosDaCategoria(c.id);
+          const ativa = c.active !== false;
+          return '<div class="linha-categoria' + (ativa ? "" : " inativa") + '">' +
+            '<span class="icone" aria-hidden="true">' + esc(c.icon || "🍕") + "</span>" +
+            '<div><div class="nome">' + esc(c.name || c.nome) + "</div>" +
+            '<div class="contagem">' + qtd + " produto(s)" + (ativa ? "" : " · oculta no cardápio") + "</div></div>" +
+            '<span class="espaco"></span>' +
+            '<div class="setas">' +
+            '<button type="button" class="seta" data-subir="' + c.id + '"' + (i === 0 ? " disabled" : "") + ' aria-label="Subir">↑</button>' +
+            '<button type="button" class="seta" data-descer="' + c.id + '"' + (i === estado.categorias.length - 1 ? " disabled" : "") + ' aria-label="Descer">↓</button>' +
+            "</div>" +
+            '<button type="button" class="interruptor' + (ativa ? " ligado" : "") + '" data-cat-ativa="' + c.id + '">' +
+            '<span class="bolinha"></span>' + (ativa ? "Ativa" : "Oculta") + "</button>" +
+            '<button type="button" class="btn btn-secundario" data-cat-editar="' + c.id + '">Editar</button>' +
+            '<button type="button" class="btn btn-fantasma" data-cat-excluir="' + c.id + '">Excluir</button>' +
             "</div>";
-          }).join("") + "</div>"
+        }).join("") + "</div>"
         : '<div class="vazio"><div class="icone">🗂️</div><strong>Nenhuma categoria ainda.</strong>' +
-          "<p>As categorias organizam o cardápio em abas.</p></div>");
+        "<p>As categorias organizam o cardápio em abas.</p></div>");
 
     $("#nova-cat").onclick = () => abrirFormCategoria(null);
   }
@@ -935,10 +1169,10 @@
     const c = id ? estado.categorias.find((x) => x.id === id) : null;
     abrirFolha(c ? "Editar categoria" : "Nova categoria",
       '<div class="campo"><label for="c-nome">Nome *</label>' +
-        '<input id="c-nome" maxlength="40" placeholder="Ex.: Pizzas especiais" value="' + esc(c ? (c.name || c.nome) : "") + '"></div>' +
+      '<input id="c-nome" maxlength="40" placeholder="Ex.: Pizzas especiais" value="' + esc(c ? (c.name || c.nome) : "") + '"></div>' +
       '<div class="campo"><label for="c-icone">Ícone</label>' +
-        '<input id="c-icone" maxlength="20" placeholder="🍕" value="' + esc(c ? (c.icon || "") : "") + '">' +
-        '<p class="dica">Um emoji. Em branco, o cardápio usa o ícone padrão.</p></div>' +
+      '<input id="c-icone" maxlength="20" placeholder="🍕" value="' + esc(c ? (c.icon || "") : "") + '">' +
+      '<p class="dica">Um emoji. Em branco, o cardápio usa o ícone padrão.</p></div>' +
       '<p class="aviso-form" id="erro-cat" hidden></p>',
       '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
       '<button type="button" class="btn btn-principal" id="salvar-cat">' + (c ? "Salvar" : "Criar categoria") + "</button>");
@@ -1076,53 +1310,53 @@
 
     $("#conteudo").innerHTML =
       '<div class="cabeca-pagina"><div><h2>Entrega</h2>' +
-        "<p>Configure como os pedidos para delivery funcionam.</p></div></div>" +
+      "<p>Configure como os pedidos para delivery funcionam.</p></div></div>" +
 
       /* ligar/desligar */
       '<div class="painel-caixa">' +
-        interruptorLinha("enabled", "Aceitar pedidos para entrega",
-          "Quando desativado, a opção de delivery será ocultada do cardápio.", e.enabled) +
+      interruptorLinha("enabled", "Aceitar pedidos para entrega",
+        "Quando desativado, a opção de delivery será ocultada do cardápio.", e.enabled) +
       "</div>" +
 
       /* modo da taxa */
       '<div class="painel-caixa"><h3>Como calcular a taxa de entrega?</h3>' +
-        '<div class="escolha-modo">' +
-          cartaoModo("confirm", "A confirmar", "A pizzaria confirma o valor da entrega pelo WhatsApp.", e.fee_mode) +
-          cartaoModo("fixed", "Taxa fixa", "Todos os pedidos possuem a mesma taxa.", e.fee_mode) +
-          cartaoModo("by_neighborhood", "Por bairro", "Cada bairro possui seu próprio valor de entrega.", e.fee_mode) +
-        "</div>" +
-        (e.fee_mode === "fixed"
-          ? '<div class="campo campo-condicional"><label for="ent-fixa">Taxa de entrega</label>' +
-            '<input id="ent-fixa" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(e.fixed_fee)) + '"></div>'
-          : "") +
+      '<div class="escolha-modo">' +
+      cartaoModo("confirm", "A confirmar", "A pizzaria confirma o valor da entrega pelo WhatsApp.", e.fee_mode) +
+      cartaoModo("fixed", "Taxa fixa", "Todos os pedidos possuem a mesma taxa.", e.fee_mode) +
+      cartaoModo("by_neighborhood", "Por bairro", "Cada bairro possui seu próprio valor de entrega.", e.fee_mode) +
+      "</div>" +
+      (e.fee_mode === "fixed"
+        ? '<div class="campo campo-condicional"><label for="ent-fixa">Taxa de entrega</label>' +
+        '<input id="ent-fixa" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(e.fixed_fee)) + '"></div>'
+        : "") +
       "</div>" +
 
       /* pedido mínimo */
       '<div class="painel-caixa"><h3>Pedido mínimo para delivery</h3>' +
-        '<div class="campo"><label for="ent-minimo">Valor mínimo</label>' +
-          '<input id="ent-minimo" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(e.min_order || 0)) + '"></div>' +
-        (Number(e.min_order) > 0
-          ? '<p class="dica-inline">Pedidos abaixo de <b>' + money(e.min_order) + "</b> não poderão escolher entrega.</p>"
-          : '<p class="dica-inline">Sem pedido mínimo.</p>') +
+      '<div class="campo"><label for="ent-minimo">Valor mínimo</label>' +
+      '<input id="ent-minimo" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(e.min_order || 0)) + '"></div>' +
+      (Number(e.min_order) > 0
+        ? '<p class="dica-inline">Pedidos abaixo de <b>' + money(e.min_order) + "</b> não poderão escolher entrega.</p>"
+        : '<p class="dica-inline">Sem pedido mínimo.</p>') +
       "</div>" +
 
       /* entrega grátis */
       '<div class="painel-caixa">' +
-        interruptorLinha("gratis", "Oferecer entrega grátis acima de determinado valor",
-          "Acima do valor informado, a taxa de entrega deixa de ser cobrada.", temGratis) +
-        (temGratis
-          ? '<div class="campo campo-condicional"><label for="ent-gratis">Entrega grátis acima de</label>' +
-            '<input id="ent-gratis" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(e.free_delivery_above)) + '"></div>'
-          : "") +
+      interruptorLinha("gratis", "Oferecer entrega grátis acima de determinado valor",
+        "Acima do valor informado, a taxa de entrega deixa de ser cobrada.", temGratis) +
+      (temGratis
+        ? '<div class="campo campo-condicional"><label for="ent-gratis">Entrega grátis acima de</label>' +
+        '<input id="ent-gratis" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(e.free_delivery_above)) + '"></div>'
+        : "") +
       "</div>" +
 
       /* bairros fora da lista */
       '<div class="painel-caixa">' +
-        interruptorLinha("unlisted", "Aceitar pedidos de bairros não cadastrados",
-          e.allow_unlisted_neighborhoods
-            ? "O cliente poderá informar outro bairro e a taxa ficará a confirmar."
-            : "Somente bairros cadastrados poderão selecionar Delivery.",
-          e.allow_unlisted_neighborhoods) +
+      interruptorLinha("unlisted", "Aceitar pedidos de bairros não cadastrados",
+        e.allow_unlisted_neighborhoods
+          ? "O cliente poderá informar outro bairro e a taxa ficará a confirmar."
+          : "Somente bairros cadastrados poderão selecionar Delivery.",
+        e.allow_unlisted_neighborhoods) +
       "</div>" +
 
       '<p class="aviso-form" id="erro-entrega" hidden></p>' +
@@ -1130,12 +1364,12 @@
 
       /* bairros */
       '<div class="painel-caixa" id="caixa-zonas"' + (porBairro ? "" : ' style="opacity:.72"') + ">" +
-        '<div class="cabeca-pagina" style="margin-bottom:12px"><div><h3 style="font-size:15px">Bairros e taxas</h3>' +
-          "<p>" + (porBairro
-            ? "Cada bairro pode ter uma taxa diferente."
-            : 'Estes valores só entram em uso quando o modo for <b>Por bairro</b>.') + "</p></div>" +
-          '<button type="button" class="btn btn-secundario" data-nova-zona>+ Adicionar bairro</button></div>' +
-        '<div id="lista-zonas"></div>' +
+      '<div class="cabeca-pagina" style="margin-bottom:12px"><div><h3 style="font-size:15px">Bairros e taxas</h3>' +
+      "<p>" + (porBairro
+        ? "Cada bairro pode ter uma taxa diferente."
+        : 'Estes valores só entram em uso quando o modo for <b>Por bairro</b>.') + "</p></div>" +
+      '<button type="button" class="btn btn-secundario" data-nova-zona>+ Adicionar bairro</button></div>' +
+      '<div id="lista-zonas"></div>' +
       "</div>";
 
     renderListaZonas();
@@ -1167,16 +1401,16 @@
         '<div class="contagem taxa">' + money(z.fee) + (ativa ? "" : " · não aparece no cardápio") + "</div></div>" +
         '<span class="espaco"></span>' +
         '<div class="setas">' +
-          '<button type="button" class="seta" data-zona-subir="' + z.id + '"' + (i === 0 ? " disabled" : "") + ' aria-label="Subir">↑</button>' +
-          '<button type="button" class="seta" data-zona-descer="' + z.id + '"' + (i === estado.zonas.length - 1 ? " disabled" : "") + ' aria-label="Descer">↓</button>' +
+        '<button type="button" class="seta" data-zona-subir="' + z.id + '"' + (i === 0 ? " disabled" : "") + ' aria-label="Subir">↑</button>' +
+        '<button type="button" class="seta" data-zona-descer="' + z.id + '"' + (i === estado.zonas.length - 1 ? " disabled" : "") + ' aria-label="Descer">↓</button>' +
         "</div>" +
         '<div class="acoes-zona">' +
-          '<button type="button" class="interruptor' + (ativa ? " ligado" : "") + '" data-zona-ativa="' + z.id + '">' +
-            '<span class="bolinha"></span>' + (ativa ? "Ativo" : "Inativo") + "</button>" +
-          '<button type="button" class="btn btn-secundario" data-zona-editar="' + z.id + '">Editar</button>' +
-          '<button type="button" class="btn btn-fantasma" data-zona-excluir="' + z.id + '">Excluir</button>' +
+        '<button type="button" class="interruptor' + (ativa ? " ligado" : "") + '" data-zona-ativa="' + z.id + '">' +
+        '<span class="bolinha"></span>' + (ativa ? "Ativo" : "Inativo") + "</button>" +
+        '<button type="button" class="btn btn-secundario" data-zona-editar="' + z.id + '">Editar</button>' +
+        '<button type="button" class="btn btn-fantasma" data-zona-excluir="' + z.id + '">Excluir</button>' +
         "</div>" +
-      "</div>";
+        "</div>";
     }).join("") + "</div>";
   }
 
@@ -1254,9 +1488,9 @@
     const z = id ? estado.zonas.find((x) => x.id === id) : null;
     abrirFolha(z ? "Editar bairro" : "Adicionar bairro",
       '<div class="campo"><label for="z-nome">Nome do bairro *</label>' +
-        '<input id="z-nome" maxlength="60" placeholder="Ex.: Centro" value="' + esc(z ? z.name : "") + '"></div>' +
+      '<input id="z-nome" maxlength="60" placeholder="Ex.: Centro" value="' + esc(z ? z.name : "") + '"></div>' +
       '<div class="campo"><label for="z-taxa">Taxa de entrega</label>' +
-        '<input id="z-taxa" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(z ? z.fee : 0)) + '"></div>' +
+      '<input id="z-taxa" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(z ? z.fee : 0)) + '"></div>' +
       interruptorLinha("zona-ativa", "Ativo", "Bairros inativos não aparecem no cardápio.", z ? z.active !== false : true) +
       '<p class="aviso-form" id="erro-zona" hidden></p>',
       '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
@@ -1357,7 +1591,7 @@
      nesta etapa — o status "Aberto agora" continua como estava.
      ------------------------------------------------------------------ */
   const DIAS_SEMANA = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira",
-                       "Quinta-feira", "Sexta-feira", "Sábado"];
+    "Quinta-feira", "Sexta-feira", "Sábado"];
   const HORA_PADRAO = { abre: "18:00", fecha: "23:00" };
 
   /* "19:00:00" (banco) -> "19:00" (input type=time) */
@@ -1416,19 +1650,19 @@
       '<div id="lista-dias">' + estado.horarios.map(cartaoDia).join("") + "</div>" +
 
       '<div class="painel-caixa"><h3>Pedidos fora do horário</h3>' +
-        '<div class="interruptor-linha"><div class="texto">Aceitar pedidos quando o estabelecimento estiver fechado' +
-          '<small id="texto-fora-horario">' + esc(textoForaHorario(aceita)) + "</small></div>" +
-          '<button type="button" class="chave' + (aceita ? " ligada" : "") +
-            '" data-chave-horario role="switch" aria-checked="' + aceita +
-            '" aria-label="Aceitar pedidos fora do horário"></button></div>' +
-        '<p class="fuso">Fuso horário: <b>' + esc(cfg.timezone || "America/Sao_Paulo") +
-          "</b> · usado para saber se a loja está aberta.</p>" +
+      '<div class="interruptor-linha"><div class="texto">Aceitar pedidos quando o estabelecimento estiver fechado' +
+      '<small id="texto-fora-horario">' + esc(textoForaHorario(aceita)) + "</small></div>" +
+      '<button type="button" class="chave' + (aceita ? " ligada" : "") +
+      '" data-chave-horario role="switch" aria-checked="' + aceita +
+      '" aria-label="Aceitar pedidos fora do horário"></button></div>' +
+      '<p class="fuso">Fuso horário: <b>' + esc(cfg.timezone || "America/Sao_Paulo") +
+      "</b> · usado para saber se a loja está aberta.</p>" +
       "</div>" +
 
       '<p class="aviso-form" id="erro-horarios" hidden></p>' +
       '<div class="barra-salvar">' +
-        '<span class="selo-sujo" id="selo-sujo"' + (estado.horariosSujo ? "" : " hidden") + ">Alterações não salvas</span>" +
-        '<button type="button" class="btn btn-principal" id="salvar-horarios">Salvar horários</button>' +
+      '<span class="selo-sujo" id="selo-sujo"' + (estado.horariosSujo ? "" : " hidden") + ">Alterações não salvas</span>" +
+      '<button type="button" class="btn btn-principal" id="salvar-horarios">Salvar horários</button>' +
       "</div>";
 
     $("#salvar-horarios").onclick = salvarHorarios;
@@ -1450,24 +1684,24 @@
     const aberto = !d.fechado;
     return '<div class="dia-horario' + (aberto ? " aberto" : "") + '" id="dia-' + d.dia + '">' +
       '<div class="dia-topo">' +
-        '<div><div class="dia-nome">' + DIAS_SEMANA[d.dia] + "</div>" +
-        '<div class="dia-estado">' + (aberto
-          ? (d.abre && d.fecha ? d.abre + " às " + d.fecha : "Informe os horários")
-          : "Fechado o dia todo") + "</div></div>" +
-        '<div class="chave-dia"><span class="rotulo">' + (aberto ? "Aberto" : "Fechado") + "</span>" +
-          '<button type="button" class="chave' + (aberto ? " ligada" : "") + '" data-dia-chave="' + d.dia +
-          '" role="switch" aria-checked="' + aberto + '" aria-label="' + DIAS_SEMANA[d.dia] + '"></button></div>' +
+      '<div><div class="dia-nome">' + DIAS_SEMANA[d.dia] + "</div>" +
+      '<div class="dia-estado">' + (aberto
+        ? (d.abre && d.fecha ? d.abre + " às " + d.fecha : "Informe os horários")
+        : "Fechado o dia todo") + "</div></div>" +
+      '<div class="chave-dia"><span class="rotulo">' + (aberto ? "Aberto" : "Fechado") + "</span>" +
+      '<button type="button" class="chave' + (aberto ? " ligada" : "") + '" data-dia-chave="' + d.dia +
+      '" role="switch" aria-checked="' + aberto + '" aria-label="' + DIAS_SEMANA[d.dia] + '"></button></div>' +
       "</div>" +
       (aberto
         ? '<div class="horas">' +
-            '<div><label for="abre-' + d.dia + '">Abre às</label>' +
-              '<input type="time" id="abre-' + d.dia + '" data-hora="abre" data-dia="' + d.dia + '" value="' + esc(d.abre) + '"></div>' +
-            '<div><label for="fecha-' + d.dia + '">Fecha às</label>' +
-              '<input type="time" id="fecha-' + d.dia + '" data-hora="fecha" data-dia="' + d.dia + '" value="' + esc(d.fecha) + '"></div>' +
-          "</div>" +
-          (fechaNoDiaSeguinte(d) ? '<p class="aviso-madrugada">Fecha no dia seguinte.</p>' : "")
+        '<div><label for="abre-' + d.dia + '">Abre às</label>' +
+        '<input type="time" id="abre-' + d.dia + '" data-hora="abre" data-dia="' + d.dia + '" value="' + esc(d.abre) + '"></div>' +
+        '<div><label for="fecha-' + d.dia + '">Fecha às</label>' +
+        '<input type="time" id="fecha-' + d.dia + '" data-hora="fecha" data-dia="' + d.dia + '" value="' + esc(d.fecha) + '"></div>' +
+        "</div>" +
+        (fechaNoDiaSeguinte(d) ? '<p class="aviso-madrugada">Fecha no dia seguinte.</p>' : "")
         : "") +
-    "</div>";
+      "</div>";
   }
 
   function marcarSujo() {
@@ -1596,12 +1830,16 @@
     s = s.replace(/\s+/g, "");                                // fora espaços
 
     if (!s) {
-      return { ok: false, valor: null,
-               motivo: "Não consegui achar o nome de usuário nesse endereço." };
+      return {
+        ok: false, valor: null,
+        motivo: "Não consegui achar o nome de usuário nesse endereço."
+      };
     }
     if (!/^[A-Za-z0-9._]{1,30}$/.test(s)) {
-      return { ok: false, valor: null,
-               motivo: "O usuário do Instagram só pode ter letras, números, ponto e sublinhado." };
+      return {
+        ok: false, valor: null,
+        motivo: "O usuário do Instagram só pode ter letras, números, ponto e sublinhado."
+      };
     }
     return { ok: true, valor: s, motivo: "" };
   }
@@ -1612,27 +1850,29 @@
     if (!s) return { ok: true, valor: null, motivo: "" };
     const d = s.replace(/\D/g, "");
     if (d.length !== 8) {
-      return { ok: false, valor: null,
-               motivo: "O CEP precisa ter 8 dígitos. Exemplo: 18603-550." };
+      return {
+        ok: false, valor: null,
+        motivo: "O CEP precisa ter 8 dígitos. Exemplo: 18603-550."
+      };
     }
     return { ok: true, valor: d.slice(0, 5) + "-" + d.slice(5), motivo: "" };
   }
 
-  const UFS = ["AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG","PA","PB",
-               "PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO"];
+  const UFS = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB",
+    "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
 
   /* Descrição do formulário: id do campo, coluna no banco e como tratar.
      A mesma lista carrega, valida e salva — sem repetir nome de coluna. */
   const CAMPOS_PERFIL = [
-    { id: "cfg-desc",   col: "short_description",    trata: textoOuNulo },
-    { id: "cfg-insta",  col: "instagram",            norm: normalizarInstagram },
-    { id: "cfg-rua",    col: "address_street",       trata: textoOuNulo },
-    { id: "cfg-num",    col: "address_number",       trata: textoOuNulo },
+    { id: "cfg-desc", col: "short_description", trata: textoOuNulo },
+    { id: "cfg-insta", col: "instagram", norm: normalizarInstagram },
+    { id: "cfg-rua", col: "address_street", trata: textoOuNulo },
+    { id: "cfg-num", col: "address_number", trata: textoOuNulo },
     { id: "cfg-bairro", col: "address_neighborhood", trata: textoOuNulo },
-    { id: "cfg-compl",  col: "address_complement",   trata: textoOuNulo },
-    { id: "cfg-cidade", col: "address_city",         trata: textoOuNulo },
-    { id: "cfg-uf",     col: "address_state",        trata: textoOuNulo },
-    { id: "cfg-cep",    col: "address_postal_code",  norm: normalizarCep }
+    { id: "cfg-compl", col: "address_complement", trata: textoOuNulo },
+    { id: "cfg-cidade", col: "address_city", trata: textoOuNulo },
+    { id: "cfg-uf", col: "address_state", trata: textoOuNulo },
+    { id: "cfg-cep", col: "address_postal_code", norm: normalizarCep }
   ];
 
   /* ---- identidade visual: logo e favicon -----------------------------
@@ -1796,27 +2036,27 @@
     const mostrar = est.remover ? "" : (est.previa || (salvo ? urlMarca(salvo, est.versao) : ""));
 
     return '<div class="marca-previa ' + qual + (mostrar ? "" : " sem-imagem") + '">' +
-        (mostrar
-          ? '<img src="' + esc(mostrar) + '" alt="' + esc(cfg.titulo) + '">'
-          : '<span class="marca-vazio">' + esc(cfg.vazio) + "</span>") +
+      (mostrar
+        ? '<img src="' + esc(mostrar) + '" alt="' + esc(cfg.titulo) + '">'
+        : '<span class="marca-vazio">' + esc(cfg.vazio) + "</span>") +
       "</div>" +
       '<div class="marca-acoes">' +
-        '<input type="file" id="arq-' + qual + '" data-marca="' + qual +
-          '" accept="image/png,image/jpeg,image/webp" hidden>' +
-        '<button type="button" class="btn btn-secundario" data-marca-escolher="' + qual + '">' +
-          esc(mostrar ? cfg.trocar : cfg.enviar) + "</button>" +
-        (mostrar && salvo && !est.arquivo
-          ? '<button type="button" class="btn btn-fantasma" data-marca-remover="' + qual + '">' +
-            esc(cfg.remover) + "</button>"
-          : "") +
-        (pendente
-          ? '<button type="button" class="btn btn-fantasma" data-marca-desfazer="' + qual + '">Desfazer</button>'
-          : "") +
-        '<p class="dica">' +
-          (est.remover ? '<b class="marca-pendente">Será removido ao salvar.</b>'
-           : est.arquivo ? '<b class="marca-pendente">Nova imagem escolhida — clique em Salvar configurações.</b>'
-           : esc(cfg.dica)) +
-        "</p>" +
+      '<input type="file" id="arq-' + qual + '" data-marca="' + qual +
+      '" accept="image/png,image/jpeg,image/webp" hidden>' +
+      '<button type="button" class="btn btn-secundario" data-marca-escolher="' + qual + '">' +
+      esc(mostrar ? cfg.trocar : cfg.enviar) + "</button>" +
+      (mostrar && salvo && !est.arquivo
+        ? '<button type="button" class="btn btn-fantasma" data-marca-remover="' + qual + '">' +
+        esc(cfg.remover) + "</button>"
+        : "") +
+      (pendente
+        ? '<button type="button" class="btn btn-fantasma" data-marca-desfazer="' + qual + '">Desfazer</button>'
+        : "") +
+      '<p class="dica">' +
+      (est.remover ? '<b class="marca-pendente">Será removido ao salvar.</b>'
+        : est.arquivo ? '<b class="marca-pendente">Nova imagem escolhida — clique em Salvar configurações.</b>'
+          : esc(cfg.dica)) +
+      "</p>" +
       "</div>";
   }
 
@@ -1841,100 +2081,100 @@
 
     $("#conteudo").innerHTML =
       '<div class="cabeca-pagina"><div><h2>Configurações</h2>' +
-        "<p>Dados da empresa</p></div></div>" +
+      "<p>Dados da empresa</p></div></div>" +
       '<div id="form-cfg">' +
 
       /* ---------- bloco 1: informações da empresa ---------- */
       '<div class="painel-caixa"><h3>Informações da empresa</h3>' +
-        '<div class="campo"><label for="cfg-nome">Nome da empresa</label>' +
-          '<input id="cfg-nome" maxlength="80" value="' + esc(e[estado.campoNome] || "") + '">' +
-          '<p class="dica">Aparece no cabeçalho, na seção sobre, no rodapé e na mensagem do pedido.</p></div>' +
+      '<div class="campo"><label for="cfg-nome">Nome da empresa</label>' +
+      '<input id="cfg-nome" maxlength="80" value="' + esc(e[estado.campoNome] || "") + '">' +
+      '<p class="dica">Aparece no cabeçalho, na seção sobre, no rodapé e na mensagem do pedido.</p></div>' +
 
-        '<div class="campo"><label for="cfg-whats">WhatsApp que recebe os pedidos</label>' +
-          '<input id="cfg-whats" inputmode="tel" autocomplete="tel" placeholder="(14) 99798-2903"' +
-          (estado.campoWhats ? "" : " disabled") +
-          ' value="' + esc(atual.ok ? atual.exibicao : guardado) + '">' +
-          '<p class="dica" id="dica-whats">' + esc(textoWhats(atual, guardado)) + "</p></div>" +
+      '<div class="campo"><label for="cfg-whats">WhatsApp que recebe os pedidos</label>' +
+      '<input id="cfg-whats" inputmode="tel" autocomplete="tel" placeholder="(14) 99798-2903"' +
+      (estado.campoWhats ? "" : " disabled") +
+      ' value="' + esc(atual.ok ? atual.exibicao : guardado) + '">' +
+      '<p class="dica" id="dica-whats">' + esc(textoWhats(atual, guardado)) + "</p></div>" +
 
-        (estado.campoWhats
-          ? '<p class="aviso-info">Pode digitar como preferir — <b>(14) 99798-2903</b>, <b>+55 14 99798-2903</b> ou só os números. ' +
-            "O painel guarda no formato do WhatsApp e o cardápio passa a enviar os pedidos para este número na hora, sem publicar o site de novo.</p>"
-          : '<p class="aviso-info">A tabela <b>businesses</b> ainda não tem uma coluna de WhatsApp. Crie a coluna <code>whatsapp</code> no Supabase para liberar este campo.</p>') +
+      (estado.campoWhats
+        ? '<p class="aviso-info">Pode digitar como preferir — <b>(14) 99798-2903</b>, <b>+55 14 99798-2903</b> ou só os números. ' +
+        "O painel guarda no formato do WhatsApp e o cardápio passa a enviar os pedidos para este número na hora, sem publicar o site de novo.</p>"
+        : '<p class="aviso-info">A tabela <b>businesses</b> ainda não tem uma coluna de WhatsApp. Crie a coluna <code>whatsapp</code> no Supabase para liberar este campo.</p>') +
 
-        (temColuna("short_description")
-          ? '<div class="campo"><label for="cfg-desc">Descrição curta <span class="opcional">opcional</span></label>' +
-              '<textarea id="cfg-desc" maxlength="' + LIMITE_DESC + '" rows="3" ' +
-              'placeholder="Conte em poucas palavras o que torna seu estabelecimento especial.">' +
-              esc(desc) + "</textarea>" +
-              '<p class="dica contador"><span id="conta-desc">' + desc.length + " / " + LIMITE_DESC +
-              "</span></p></div>"
-          : "") +
+      (temColuna("short_description")
+        ? '<div class="campo"><label for="cfg-desc">Descrição curta <span class="opcional">opcional</span></label>' +
+        '<textarea id="cfg-desc" maxlength="' + LIMITE_DESC + '" rows="3" ' +
+        'placeholder="Conte em poucas palavras o que torna seu estabelecimento especial.">' +
+        esc(desc) + "</textarea>" +
+        '<p class="dica contador"><span id="conta-desc">' + desc.length + " / " + LIMITE_DESC +
+        "</span></p></div>"
+        : "") +
       "</div>" +
 
       /* ---------- bloco 2: identidade visual ---------- */
       ((temColuna("logo_path") || temColuna("favicon_path"))
         ? '<div class="painel-caixa"><h3>Identidade visual</h3>' +
-            (temColuna("logo_path")
-              ? '<div class="campo"><label>' + MARCA.logo.titulo + "</label>" +
-                '<div class="marca-area" id="marca-logo">' + conteudoMarca("logo") + "</div></div>"
-              : "") +
-            (temColuna("favicon_path")
-              ? '<div class="campo"><label>' + MARCA.favicon.titulo +
-                ' <span class="opcional">ícone da aba</span></label>' +
-                '<div class="marca-area" id="marca-favicon">' + conteudoMarca("favicon") + "</div></div>"
-              : "") +
-            '<p class="aviso-info">As imagens são enviadas quando você clica em <b>Salvar configurações</b>. ' +
-              "Elas ainda não aparecem no site — isso entra na próxima etapa.</p>" +
-          "</div>"
+        (temColuna("logo_path")
+          ? '<div class="campo"><label>' + MARCA.logo.titulo + "</label>" +
+          '<div class="marca-area" id="marca-logo">' + conteudoMarca("logo") + "</div></div>"
+          : "") +
+        (temColuna("favicon_path")
+          ? '<div class="campo"><label>' + MARCA.favicon.titulo +
+          ' <span class="opcional">ícone da aba</span></label>' +
+          '<div class="marca-area" id="marca-favicon">' + conteudoMarca("favicon") + "</div></div>"
+          : "") +
+        '<p class="aviso-info">As imagens são enviadas quando você clica em <b>Salvar configurações</b>. ' +
+        "Elas ainda não aparecem no site — isso entra na próxima etapa.</p>" +
+        "</div>"
         : "") +
 
       /* ---------- bloco 3: redes sociais ---------- */
       (temColuna("instagram")
         ? '<div class="painel-caixa"><h3>Redes sociais</h3>' +
-            '<div class="campo"><label for="cfg-insta">Instagram <span class="opcional">opcional</span></label>' +
-              '<div class="campo-arroba"><span aria-hidden="true">@</span>' +
-              '<input id="cfg-insta" autocapitalize="none" autocorrect="off" spellcheck="false" ' +
-              'placeholder="estanciatreze" value="' + esc(insta) + '"></div>' +
-              '<p class="dica" id="dica-insta">' + esc(textoInsta(normalizarInstagram(insta), insta)) + "</p></div>" +
-            '<p class="aviso-info">Pode colar o endereço inteiro do perfil — ' +
-              "<b>instagram.com/estanciatreze</b> — que o painel guarda só o nome de usuário.</p>" +
-          "</div>"
+        '<div class="campo"><label for="cfg-insta">Instagram <span class="opcional">opcional</span></label>' +
+        '<div class="campo-arroba"><span aria-hidden="true">@</span>' +
+        '<input id="cfg-insta" autocapitalize="none" autocorrect="off" spellcheck="false" ' +
+        'placeholder="estanciatreze" value="' + esc(insta) + '"></div>' +
+        '<p class="dica" id="dica-insta">' + esc(textoInsta(normalizarInstagram(insta), insta)) + "</p></div>" +
+        '<p class="aviso-info">Pode colar o endereço inteiro do perfil — ' +
+        "<b>instagram.com/estanciatreze</b> — que o painel guarda só o nome de usuário.</p>" +
+        "</div>"
         : "") +
 
       /* ---------- bloco 4: endereço ---------- */
       (temColuna("address_street")
         ? '<div class="painel-caixa"><h3>Endereço do estabelecimento</h3>' +
-            '<div class="linha-rua">' +
-              campo("cfg-rua", "Rua / Avenida", 'maxlength="120" autocomplete="address-line1" placeholder="Ex.: Rua das Palmeiras"') +
-              campo("cfg-num", "Número", 'maxlength="20" placeholder="123, 123-A ou s/n"') +
-            "</div>" +
-            '<div class="duas">' +
-              campo("cfg-bairro", "Bairro", 'maxlength="80" placeholder="Ex.: Centro"') +
-              campo("cfg-compl", 'Complemento <span class="opcional">opcional</span>', 'maxlength="80" placeholder="Sala, bloco, ponto de referência"') +
-            "</div>" +
-            '<div class="linha-cidade">' +
-              campo("cfg-cidade", "Cidade", 'maxlength="80" placeholder="Ex.: Botucatu"') +
-              '<div class="campo"><label for="cfg-uf">Estado</label>' +
-                '<select id="cfg-uf"><option value="">UF</option>' +
-                UFS.map(function (uf) {
-                  return '<option value="' + uf + '"' +
-                    (valorAtual("address_state").toUpperCase() === uf ? " selected" : "") + ">" + uf + "</option>";
-                }).join("") + "</select></div>" +
-              campo("cfg-cep", "CEP", 'inputmode="numeric" maxlength="9" autocomplete="postal-code" placeholder="18603-550"') +
-            "</div>" +
-            '<p class="aviso-info">Todos os campos de endereço são opcionais nesta etapa — ' +
-              "preencha só o que fizer sentido para a sua casa.</p>" +
-          "</div>"
+        '<div class="linha-rua">' +
+        campo("cfg-rua", "Rua / Avenida", 'maxlength="120" autocomplete="address-line1" placeholder="Ex.: Rua das Palmeiras"') +
+        campo("cfg-num", "Número", 'maxlength="20" placeholder="123, 123-A ou s/n"') +
+        "</div>" +
+        '<div class="duas">' +
+        campo("cfg-bairro", "Bairro", 'maxlength="80" placeholder="Ex.: Centro"') +
+        campo("cfg-compl", 'Complemento <span class="opcional">opcional</span>', 'maxlength="80" placeholder="Sala, bloco, ponto de referência"') +
+        "</div>" +
+        '<div class="linha-cidade">' +
+        campo("cfg-cidade", "Cidade", 'maxlength="80" placeholder="Ex.: Botucatu"') +
+        '<div class="campo"><label for="cfg-uf">Estado</label>' +
+        '<select id="cfg-uf"><option value="">UF</option>' +
+        UFS.map(function (uf) {
+          return '<option value="' + uf + '"' +
+            (valorAtual("address_state").toUpperCase() === uf ? " selected" : "") + ">" + uf + "</option>";
+        }).join("") + "</select></div>" +
+        campo("cfg-cep", "CEP", 'inputmode="numeric" maxlength="9" autocomplete="postal-code" placeholder="18603-550"') +
+        "</div>" +
+        '<p class="aviso-info">Todos os campos de endereço são opcionais nesta etapa — ' +
+        "preencha só o que fizer sentido para a sua casa.</p>" +
+        "</div>"
         : "") +
 
       (temPerfil() ? ""
         : '<p class="aviso-info">A tabela <b>businesses</b> ainda não tem as colunas de perfil. ' +
-          "Rode o <code>business-profile-schema.sql</code> no Supabase para liberar estes campos.</p>") +
+        "Rode o <code>business-profile-schema.sql</code> no Supabase para liberar estes campos.</p>") +
 
       '<p class="aviso-form" id="erro-cfg" hidden></p>' +
       '<div class="barra-salvar">' +
-        '<span class="selo-sujo" id="selo-sujo-cfg"' + (estado.cfgSujo ? "" : " hidden") + ">Alterações não salvas</span>" +
-        '<button type="button" class="btn btn-principal" id="salvar-cfg">Salvar configurações</button>' +
+      '<span class="selo-sujo" id="selo-sujo-cfg"' + (estado.cfgSujo ? "" : " hidden") + ">Alterações não salvas</span>" +
+      '<button type="button" class="btn btn-principal" id="salvar-cfg">Salvar configurações</button>' +
       "</div>" +
       "</div>";
 
@@ -1946,13 +2186,13 @@
 
   const textoWhats = (r, bruto) =>
     !String(bruto || "").trim() ? "Sem número cadastrado — o cardápio não consegue enviar pedidos."
-    : r.ok ? "Será gravado como " + r.numero + "."
-    : r.motivo;
+      : r.ok ? "Será gravado como " + r.numero + "."
+        : r.motivo;
 
   const textoInsta = (r, bruto) =>
     !String(bruto || "").trim() ? "Deixe em branco se a casa não tem Instagram."
-    : r.ok ? "Será gravado como " + r.valor + "."
-    : r.motivo;
+      : r.ok ? "Será gravado como " + r.valor + "."
+        : r.motivo;
 
   /* Os eventos são ligados ao #form-cfg, que é recriado a cada render —
      os ouvintes vão embora junto com o nó antigo, sem acumular. */
@@ -2095,7 +2335,7 @@
          guardando o caminho puro, sem "?v=" */
       const agora = Date.now();
       estado.marca = {
-        logo:    { arquivo: null, previa: "", remover: false, versao: agora },
+        logo: { arquivo: null, previa: "", remover: false, versao: agora },
         favicon: { arquivo: null, previa: "", remover: false, versao: agora }
       };
       $("#topo-empresa").textContent = estado.empresa[estado.campoNome] || "Painel";
@@ -2247,17 +2487,17 @@
     return '<div class="linha-dominio' + (ativo ? "" : " inativo") + '">' +
       '<span class="icone" aria-hidden="true">🌐</span>' +
       '<div class="dominio-texto"><div class="endereco">' + esc(d.domain) + "</div>" +
-        etiquetasDominio(d) + "</div>" +
+      etiquetasDominio(d) + "</div>" +
       '<span class="espaco"></span>' +
       '<div class="acoes">' +
-        (principal ? "" :
-          '<button type="button" class="btn btn-secundario" data-dom-principal="' + esc(d.id) + '">Tornar principal</button>') +
-        '<button type="button" class="interruptor' + (ativo ? " ligado" : "") + '" data-dom-ativo="' + esc(d.id) + '">' +
-          '<span class="bolinha"></span>' + (ativo ? "Ativo" : "Inativo") + "</button>" +
-        (principal ? "" :
-          '<button type="button" class="btn btn-fantasma" data-dom-excluir="' + esc(d.id) + '">Excluir</button>') +
+      (principal ? "" :
+        '<button type="button" class="btn btn-secundario" data-dom-principal="' + esc(d.id) + '">Tornar principal</button>') +
+      '<button type="button" class="interruptor' + (ativo ? " ligado" : "") + '" data-dom-ativo="' + esc(d.id) + '">' +
+      '<span class="bolinha"></span>' + (ativo ? "Ativo" : "Inativo") + "</button>" +
+      (principal ? "" :
+        '<button type="button" class="btn btn-fantasma" data-dom-excluir="' + esc(d.id) + '">Excluir</button>') +
       "</div>" +
-    "</div>";
+      "</div>";
   }
 
   function renderDominios() {
@@ -2288,15 +2528,15 @@
       (lista.length
         ? '<div class="lista">' + lista.map(linhaDominio).join("") + "</div>"
         : '<div class="vazio"><div class="icone">🌐</div><strong>Nenhum domínio cadastrado.</strong>' +
-          "<p>Enquanto não houver um endereço aqui, quem abrir o site vê " +
-          "“Estabelecimento não encontrado”.</p>" +
-          '<button type="button" class="btn btn-principal" data-novo-dominio>+ Adicionar domínio</button></div>') +
+        "<p>Enquanto não houver um endereço aqui, quem abrir o site vê " +
+        "“Estabelecimento não encontrado”.</p>" +
+        '<button type="button" class="btn btn-principal" data-novo-dominio>+ Adicionar domínio</button></div>') +
       '<div class="painel-caixa"><h3>Como isso funciona</h3>' +
-        '<p class="dica">Quem abre um destes endereços cai no cardápio desta empresa. ' +
-        "O <b>principal</b> é o endereço oficial da casa; os outros continuam funcionando normalmente " +
-        "enquanto estiverem ativos — dá para manter o endereço da hospedagem e o domínio próprio ao mesmo tempo.</p>" +
-        '<p class="dica" style="margin-top:8px">' + esc(AVISO_DNS) +
-        " Cadastrar aqui não faz essa parte, e também não comprova que o domínio é seu.</p>" +
+      '<p class="dica">Quem abre um destes endereços cai no cardápio desta empresa. ' +
+      "O <b>principal</b> é o endereço oficial da casa; os outros continuam funcionando normalmente " +
+      "enquanto estiverem ativos — dá para manter o endereço da hospedagem e o domínio próprio ao mesmo tempo.</p>" +
+      '<p class="dica" style="margin-top:8px">' + esc(AVISO_DNS) +
+      " Cadastrar aqui não faz essa parte, e também não comprova que o domínio é seu.</p>" +
       "</div>";
   }
 
@@ -2305,18 +2545,18 @@
     const primeiro = estado.dominios.length === 0;
     abrirFolha("Adicionar domínio",
       '<div class="campo"><label for="dom-endereco">Domínio *</label>' +
-        '<input id="dom-endereco" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
-        'maxlength="253" placeholder="minhaempresa.com.br">' +
-        '<p class="dica">Pode colar do jeito que estiver — <b>https://www.minhaempresa.com.br/</b> ' +
-        "também serve. O sistema guarda só o endereço.</p></div>" +
+      '<input id="dom-endereco" inputmode="url" autocapitalize="off" autocorrect="off" spellcheck="false" ' +
+      'maxlength="253" placeholder="minhaempresa.com.br">' +
+      '<p class="dica">Pode colar do jeito que estiver — <b>https://www.minhaempresa.com.br/</b> ' +
+      "também serve. O sistema guarda só o endereço.</p></div>" +
       /* mesma chave das outras telas do painel, não um checkbox solto */
       '<div class="interruptor-linha"><div class="texto">Definir como domínio principal' +
-        "<small>" + (primeiro
-          ? "É o primeiro endereço da empresa — normalmente ele é o principal."
-          : "O domínio principal de hoje passa a ser secundário, e continua ativo.") + "</small></div>" +
-        '<button type="button" class="chave' + (primeiro ? " ligada" : "") + '" id="dom-principal" ' +
-        'role="switch" aria-checked="' + (primeiro ? "true" : "false") +
-        '" aria-label="Definir como domínio principal"></button></div>' +
+      "<small>" + (primeiro
+        ? "É o primeiro endereço da empresa — normalmente ele é o principal."
+        : "O domínio principal de hoje passa a ser secundário, e continua ativo.") + "</small></div>" +
+      '<button type="button" class="chave' + (primeiro ? " ligada" : "") + '" id="dom-principal" ' +
+      'role="switch" aria-checked="' + (primeiro ? "true" : "false") +
+      '" aria-label="Definir como domínio principal"></button></div>' +
       '<p class="aviso-info" id="dom-dns" hidden>' + esc(AVISO_DNS) + "</p>" +
       '<p class="aviso-form" id="erro-dom" hidden></p>',
       '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
@@ -2372,7 +2612,7 @@
             await recarregarDominios();
             fecharFolha();
             toast("Domínio adicionado, mas não foi possível torná-lo principal: " +
-                  (e2 && e2.message ? e2.message : erroDominio(e2)), "erro");
+              (e2 && e2.message ? e2.message : erroDominio(e2)), "erro");
             return;
           }
         } else {
@@ -2499,7 +2739,7 @@
       "Este endereço deixará de localizar o estabelecimento." +
       (unico
         ? " Ele é o ÚNICO endereço cadastrado: sem ele, nenhum endereço vai abrir o cardápio desta empresa, " +
-          "e quem tentar verá “Estabelecimento não encontrado”."
+        "e quem tentar verá “Estabelecimento não encontrado”."
         : ""),
       unico ? "Remover mesmo assim" : "Remover domínio",
       async function () {
@@ -2522,6 +2762,16 @@
       this.setAttribute("aria-label", mostrando ? "Mostrar senha" : "Ocultar senha");
     });
     $("#btn-sair").addEventListener("click", sair);
+
+    /* primeiro acesso: mesmo comportamento do "Mostrar" do login */
+    $("#form-senha").addEventListener("submit", criarSenha);
+    $("#ver-nova-senha").addEventListener("click", function () {
+      const i = $("#nova-senha");
+      const mostrando = i.type === "text";
+      i.type = mostrando ? "password" : "text";
+      this.textContent = mostrando ? "Mostrar" : "Ocultar";
+      this.setAttribute("aria-label", mostrando ? "Mostrar senha" : "Ocultar senha");
+    });
 
     document.addEventListener("click", function (ev) {
       const aba = ev.target.closest("[data-aba]");
@@ -2631,22 +2881,53 @@
   /* ---------- INÍCIO ------------------------------------------------ */
   async function iniciar() {
     ligarEventos();
-    try {
-      const { data } = await sb.auth.getSession();
-      if (data && data.session) {
-        estado.usuario = data.session.user;
-        await iniciarSessao();
-      } else {
+
+    /* O ouvinte de sessão é registrado ANTES de qualquer desvio.
+       Abaixo existem caminhos que terminam a função mais cedo (link
+       vencido, convite sem sessão); se o registro ficasse no fim, esses
+       caminhos sairiam sem ouvinte nenhum — e o login feito logo em
+       seguida, na mesma página, não teria quem preenchesse
+       estado.usuario. */
+    sb.auth.onAuthStateChange(function (evento, sessao) {
+      if (evento === "SIGNED_OUT") {
+        limparPendente(estado.usuario && estado.usuario.id);   // antes de zerar
+        estado.usuario = null;
         mostrarTela("login");
+      } else if (sessao && sessao.user) { estado.usuario = sessao.user; }
+    });
+
+    /* Link de e-mail que o Supabase já recusou (vencido, usado duas
+       vezes): não há sessão nenhuma para esperar. */
+    if (ENTRADA.temErro) { conviteInvalido(); return; }
+
+    try {
+      /* Com detectSessionInUrl ligado, é aqui que o SDK termina de
+         transformar o link do convite em sessão. */
+      const { data } = await sb.auth.getSession();
+      const sessao = data && data.session;
+
+      if (!sessao) {
+        /* Veio por um link de convite, mas não sobrou sessão: o link não
+           vale mais. */
+        if (ENTRADA.primeiroAcesso) { conviteInvalido(); return; }
+        mostrarTela("login");
+      } else if (ENTRADA.primeiroAcesso || pendenteDe(sessao.user && sessao.user.id)) {
+        /* Ou o link acabou de chegar, ou esta MESMA conta já tinha um
+           primeiro acesso em aberto — inclusive de uma aba fechada sem
+           criar a senha. */
+        estado.usuario = sessao.user;
+        limparUrl();                     // tokens saem antes de a tela aparecer
+        telaCriarSenha(sessao.user);     // senha primeiro; painel só depois
+      } else {
+        /* Caminho de sempre: sessão guardada ou login por senha. */
+        estado.usuario = sessao.user;
+        await iniciarSessao();
       }
     } catch (e) {
       console.error("[admin]", e);
+      if (ENTRADA.primeiroAcesso) { conviteInvalido(); return; }
       mostrarTela("login");
     }
-    sb.auth.onAuthStateChange(function (evento, sessao) {
-      if (evento === "SIGNED_OUT") { estado.usuario = null; mostrarTela("login"); }
-      else if (sessao && sessao.user) { estado.usuario = sessao.user; }
-    });
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", iniciar);
