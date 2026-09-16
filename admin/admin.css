@@ -1,5 +1,5 @@
 /* =====================================================================
-   PAINEL ADMINISTRATIVO — ESTÂNCIA TREZE PIZZARIA
+   PAINEL ADMINISTRATIVO — SISTEMA MULTITENANT
    Mesma paleta do site público, em layout de painel.
    ===================================================================== */
 
@@ -92,10 +92,14 @@ img{ max-width:100%; display:block; }
   width:52px; height:52px; border-radius:50%;
   display:grid; place-items:center;
   background:linear-gradient(160deg,#E8B45C,#C98B2E);
-  color:#3A060F; font-family:var(--display); font-weight:700; font-size:19px;
+  color:#3A060F; font-family:var(--display); font-weight:700; font-size:17px;
+  letter-spacing:-.01em;
   box-shadow:inset 0 0 0 2px rgba(58,6,15,.22);
 }
-.selo-marca.pequeno{ width:38px; height:38px; font-size:15px; }
+/* O selo passou de dois caracteres para três ("ADM"), então o corpo da
+   fonte desce um pouco para o texto não encostar na borda do círculo.
+   Medida, posição e cor do selo continuam as mesmas. */
+.selo-marca.pequeno{ width:38px; height:38px; font-size:12px; }
 
 .cartao-login{
   width:100%; max-width:394px;

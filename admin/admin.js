@@ -1,5 +1,5 @@
 /* =====================================================================
-   PAINEL ADMINISTRATIVO — ESTÂNCIA TREZE PIZZARIA
+   PAINEL ADMINISTRATIVO — SISTEMA MULTITENANT
    ---------------------------------------------------------------------
    Usa a MESMA chave publicável do site público (../supabase-config.js).
    Nenhuma chave secreta, nenhum service_role, nenhuma senha de banco.
@@ -102,7 +102,7 @@
      Some em três situações, e só nelas: a senha foi criada, o usuário
      saiu, ou aquele fluxo foi invalidado de vez.
      ------------------------------------------------------------------ */
-  const CHAVE_PENDENTE = "estancia13.primeiro-acesso";
+  const CHAVE_PENDENTE = "painel.primeiro-acesso";
 
   const marcarPendente = (userId) => {
     if (!userId) return;
@@ -2134,10 +2134,10 @@
         '<div class="campo"><label for="cfg-insta">Instagram <span class="opcional">opcional</span></label>' +
         '<div class="campo-arroba"><span aria-hidden="true">@</span>' +
         '<input id="cfg-insta" autocapitalize="none" autocorrect="off" spellcheck="false" ' +
-        'placeholder="estanciatreze" value="' + esc(insta) + '"></div>' +
+        'placeholder="seunegocio" value="' + esc(insta) + '"></div>' +
         '<p class="dica" id="dica-insta">' + esc(textoInsta(normalizarInstagram(insta), insta)) + "</p></div>" +
         '<p class="aviso-info">Pode colar o endereço inteiro do perfil — ' +
-        "<b>instagram.com/estanciatreze</b> — que o painel guarda só o nome de usuário.</p>" +
+        "<b>instagram.com/seunegocio</b> — que o painel guarda só o nome de usuário.</p>" +
         "</div>"
         : "") +
 
