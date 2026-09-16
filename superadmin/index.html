@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Administração da Plataforma</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#1B0509">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="superadmin.css">
+</head>
+<body>
+
+<!-- ===================== CARREGANDO ===================== -->
+<div class="tela-centro" id="tela-carregando">
+  <div class="girando" aria-hidden="true"></div>
+  <p>Carregando...</p>
+</div>
+
+<!-- ===================== LOGIN =====================
+     Só entrada. Não existe cadastro de super admin por aqui: quem pode
+     entrar é quem já está em platform_admins, e isso é decidido no banco.
+     ================================================= -->
+<main class="tela-centro" id="tela-login" hidden>
+  <form class="cartao-login" id="form-login" autocomplete="on" novalidate>
+    <span class="selo-plataforma" aria-hidden="true">ADM</span>
+    <h1>Administração da Plataforma</h1>
+    <p class="sub">Acesso restrito</p>
+
+    <div class="campo">
+      <label for="login-email">E-mail</label>
+      <input id="login-email" type="email" autocomplete="username" required placeholder="voce@exemplo.com">
+    </div>
+
+    <div class="campo">
+      <label for="login-senha">Senha</label>
+      <div class="campo-senha">
+        <input id="login-senha" type="password" autocomplete="current-password" required placeholder="Sua senha">
+        <button type="button" class="olho" id="ver-senha" aria-label="Mostrar senha">Mostrar</button>
+      </div>
+    </div>
+
+    <p class="erro-login" id="erro-login" hidden></p>
+
+    <button type="submit" class="btn btn-principal btn-bloco" id="btn-entrar">Entrar</button>
+    <p class="rodape-login">Esta área é exclusiva da administração da plataforma.</p>
+  </form>
+</main>
+
+<!-- ===================== SEM ACESSO =====================
+     A conta entrou, mas is_platform_admin() respondeu false (ou não deu
+     para perguntar). Nenhum dado de empresa é carregado nesta tela.
+     ====================================================== -->
+<main class="tela-centro" id="tela-restrito" hidden>
+  <section class="cartao-login" aria-live="polite">
+    <span class="selo-plataforma bloqueado" aria-hidden="true">🔒</span>
+    <h1 id="restrito-titulo">Acesso restrito</h1>
+    <p class="sub">Administração da plataforma</p>
+
+    <p class="aviso-restrito" id="restrito-texto">
+      Esta conta não possui acesso à administração da plataforma.
+    </p>
+    <p class="conta-restrita" id="restrito-email"></p>
+
+    <button type="button" class="btn btn-secundario btn-bloco" id="btn-tentar-de-novo" hidden>Tentar novamente</button>
+    <a class="btn btn-principal btn-bloco" id="btn-ir-painel" href="../admin/">Ir para o painel do estabelecimento</a>
+    <button type="button" class="btn btn-fantasma btn-bloco" id="btn-sair-restrito">Sair</button>
+  </section>
+</main>
+
+<!-- ===================== PAINEL ===================== -->
+<div id="tela-painel" hidden>
+  <header class="topo-plataforma">
+    <div class="marca">
+      <span class="selo-plataforma pequeno" aria-hidden="true">ADM</span>
+      <div class="marca-texto">
+        <strong>Administração da Plataforma</strong>
+        <small>Super admin</small>
+      </div>
+    </div>
+    <div class="topo-direita">
+      <span class="email" id="topo-email"></span>
+      <button type="button" class="btn btn-fantasma" id="btn-sair">Sair</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="lateral" aria-label="Seções da plataforma">
+      <button type="button" class="item-menu" data-aba="visao" aria-current="true"><span aria-hidden="true">📊</span> Visão geral</button>
+      <button type="button" class="item-menu" data-aba="empresas"><span aria-hidden="true">🏪</span> Empresas</button>
+    </nav>
+
+    <main class="conteudo" id="conteudo"></main>
+  </div>
+
+  <nav class="barra-inferior" aria-label="Seções da plataforma">
+    <button type="button" class="item-barra" data-aba="visao" aria-current="true"><span aria-hidden="true">📊</span>Visão geral</button>
+    <button type="button" class="item-barra" data-aba="empresas"><span aria-hidden="true">🏪</span>Empresas</button>
+  </nav>
+</div>
+
+<!-- ===================== MODAIS ===================== -->
+<div class="cortina" id="cortina" hidden></div>
+
+<section class="folha" id="folha" role="dialog" aria-modal="true" aria-labelledby="folha-titulo" hidden>
+  <div class="folha-puxador"></div>
+  <div class="folha-cabeca">
+    <h2 id="folha-titulo">—</h2>
+    <button type="button" class="fechar" data-fechar aria-label="Fechar">×</button>
+  </div>
+  <div class="folha-corpo" id="folha-corpo"></div>
+  <div class="folha-rodape" id="folha-rodape"></div>
+</section>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="../supabase-config.js"></script>
+<script src="superadmin.js"></script>
+</body>
+</html>
