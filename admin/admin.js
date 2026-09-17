@@ -714,6 +714,16 @@
   /* ---------- 7. PRODUTO (FORMULÁRIO) ------------------------------- */
   let form = null;   // rascunho do produto em edição
 
+  /* Um tamanho em branco. Existe como função porque três lugares criam
+     tamanhos vazios (abrir o formulário, "+ Adicionar tamanho" e remover
+     o último): com um literal repetido, acrescentar um campo novo — foi
+     o caso de metade/promoMetade — deixaria um deles para trás.
+
+     Campos de preço nascem "" e não 0: vazio quer dizer "não informado",
+     e no meio a meio isso é a diferença entre "este sabor não entra" e
+     "este sabor sai de graça". */
+  const tamanhoVazio = () => ({ nome: "", detalhe: "", preco: "", promo: "", metade: "", promoMetade: "" });
+
   function abrirFormProduto(id) {
     const p = id ? estado.produtos.find((x) => x.id === id) : null;
     const tamanhos = p && Array.isArray(p.sizes) ? p.sizes : [];
@@ -733,10 +743,17 @@
       fim: p ? paraCampoData(p.promo_end) : "",
       destaque: p ? p.featured === true : false,
       disponivel: p ? p.available !== false : true,
+      /* half_price e half_promo_price são novos: produtos cadastrados
+         antes do meio a meio simplesmente não têm essas chaves. O teste
+         é `!= null`, que cobre tanto a chave ausente quanto o null
+         gravado — e nos dois casos o campo abre VAZIO, nunca zero. Zero
+         seria um preço de verdade; ausência é "não oferece". */
       tamanhos: tamanhos.length ? tamanhos.map((t) => ({
         nome: t.name || t.nome || "", detalhe: t.detail || t.detalhe || "",
-        preco: t.price != null ? t.price : "", promo: t.promo_price != null ? t.promo_price : ""
-      })) : [{ nome: "", detalhe: "", preco: "", promo: "" }],
+        preco: t.price != null ? t.price : "", promo: t.promo_price != null ? t.promo_price : "",
+        metade: t.half_price != null ? t.half_price : "",
+        promoMetade: t.half_promo_price != null ? t.half_promo_price : ""
+      })) : [tamanhoVazio()],
       bordas: p && Array.isArray(p.borders) ? p.borders.map((b) => ({ nome: b.name || b.nome || "", preco: b.price != null ? b.price : 0 })) : [],
       adicionais: p && Array.isArray(p.addons) ? p.addons.map((a) => ({ nome: a.name || a.nome || "", preco: a.price != null ? a.price : 0 })) : []
     };
@@ -805,17 +822,25 @@
         '<div class="campo"><label for="f-promo">Preço promocional</label><input id="f-promo" inputmode="decimal" placeholder="opcional" value="' + esc(precoTexto(form.promo)) + '"></div>' +
         "</div>" + janelaPromo();
     }
+    /* Os quatro preços ficam numa faixa só, na ordem em que a casa
+       pensa: inteira antes de metade, normal antes de promocional.
+       Nome e detalhe atravessam a linha inteira (.largura-total) — no
+       celular tudo empilha, e em nenhuma largura há rolagem lateral. */
     return '<div style="margin-top:12px">' +
       form.tamanhos.map(function (t, i) {
-        return '<div class="linha-item"><div class="campos tamanho">' +
-          '<label><span class="mini-rotulo">Tamanho</span><input data-tam="nome" data-i="' + i + '" placeholder="Ex.: Grande" value="' + esc(t.nome) + '"></label>' +
-          '<label><span class="mini-rotulo">Preço</span><input data-tam="preco" data-i="' + i + '" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(t.preco)) + '"></label>' +
-          '<label><span class="mini-rotulo">Promocional</span><input data-tam="promo" data-i="' + i + '" inputmode="decimal" placeholder="opcional" value="' + esc(precoTexto(t.promo)) + '"></label>' +
-          '<label style="grid-column:1/-1"><span class="mini-rotulo">Detalhe (opcional)</span><input data-tam="detalhe" data-i="' + i + '" placeholder="Ex.: 8 fatias · 35 cm" value="' + esc(t.detalhe) + '"></label>' +
+        return '<div class="linha-item linha-tamanho"><div class="campos tamanho">' +
+          '<label class="largura-total"><span class="mini-rotulo">Tamanho</span><input data-tam="nome" data-i="' + i + '" placeholder="Ex.: Grande" value="' + esc(t.nome) + '"></label>' +
+          '<label><span class="mini-rotulo">Preço inteiro *</span><input data-tam="preco" data-i="' + i + '" inputmode="decimal" placeholder="0,00" value="' + esc(precoTexto(t.preco)) + '"></label>' +
+          '<label><span class="mini-rotulo">Preço metade</span><input data-tam="metade" data-i="' + i + '" inputmode="decimal" placeholder="opcional" value="' + esc(precoTexto(t.metade)) + '"></label>' +
+          '<label><span class="mini-rotulo">Promo inteira</span><input data-tam="promo" data-i="' + i + '" inputmode="decimal" placeholder="opcional" value="' + esc(precoTexto(t.promo)) + '"></label>' +
+          '<label><span class="mini-rotulo">Promo metade</span><input data-tam="promoMetade" data-i="' + i + '" inputmode="decimal" placeholder="opcional" value="' + esc(precoTexto(t.promoMetade)) + '"></label>' +
+          '<label class="largura-total"><span class="mini-rotulo">Detalhe (opcional)</span><input data-tam="detalhe" data-i="' + i + '" placeholder="Ex.: 8 fatias · 35 cm" value="' + esc(t.detalhe) + '"></label>' +
           "</div>" +
           '<button type="button" class="remover-item" data-remove-tam="' + i + '" aria-label="Remover tamanho">×</button></div>';
       }).join("") +
       '<button type="button" class="add-item" data-add="tamanho">+ Adicionar tamanho</button>' +
+      '<p class="dica dica-meio">O preço da metade é usado na montagem de pizzas meio a meio. ' +
+      "Deixe em branco para não oferecer este sabor/tamanho no meio a meio.</p>" +
       "</div>" + janelaPromo();
   }
 
@@ -898,7 +923,7 @@
     if (add) {
       guardarCampos();
       if (add.dataset.add === "tamanho") {
-        form.tamanhos.push({ nome: "", detalhe: "", preco: "", promo: "" });
+        form.tamanhos.push(tamanhoVazio());
         redesenharPrecos();
       } else {
         form[add.dataset.add].push({ nome: "", preco: "" });
@@ -909,7 +934,7 @@
     if (remTam) {
       guardarCampos();
       form.tamanhos.splice(Number(remTam.dataset.removeTam), 1);
-      if (!form.tamanhos.length) form.tamanhos.push({ nome: "", detalhe: "", preco: "", promo: "" });
+      if (!form.tamanhos.length) form.tamanhos.push(tamanhoVazio());
       redesenharPrecos();
       return;
     }
@@ -1031,14 +1056,42 @@
       const validos = form.tamanhos.filter((t) => t.nome.trim() && numeroOuNulo(t.preco) != null);
       if (!validos.length) return mostrar("Cadastre pelo menos um tamanho com nome e preço.");
       const ids = idsUnicos(validos);
+      /* numeroOuNulo é a MESMA conversão dos outros preços do painel, e
+         ela devolve null para campo vazio. É o que garante que "não
+         informei" grave null em vez de 0 — nada aqui divide price por
+         dois: o valor da metade é decisão da casa. */
       sizes = validos.map(function (t, i) {
         return {
           id: ids[i], name: t.nome.trim(), detail: (t.detalhe || "").trim(),
-          price: numeroOuNulo(t.preco), promo_price: numeroOuNulo(t.promo)
+          price: numeroOuNulo(t.preco), promo_price: numeroOuNulo(t.promo),
+          half_price: numeroOuNulo(t.metade), half_promo_price: numeroOuNulo(t.promoMetade)
         };
       });
       const ruim = sizes.find((x) => x.promo_price != null && x.promo_price >= x.price);
       if (ruim) return mostrar("O preço promocional de " + ruim.name + " precisa ser menor que o preço normal.");
+
+      /* --- meio a meio ---
+         Só conferimos o que foi preenchido. Metade em branco continua
+         sendo uma resposta válida: quer dizer que aquele tamanho não
+         entra no meio a meio. */
+      const metadeInvalida = sizes.find((x) => x.half_price != null && !(x.half_price > 0));
+      if (metadeInvalida) {
+        return mostrar("O preço da metade de " + metadeInvalida.name + " precisa ser maior que zero. " +
+          "Deixe em branco para não oferecer este tamanho no meio a meio.");
+      }
+      const promoSemMetade = sizes.find((x) => x.half_promo_price != null && x.half_price == null);
+      if (promoSemMetade) {
+        return mostrar("Para ter promoção da metade em " + promoSemMetade.name + ", informe antes o preço da metade.");
+      }
+      const promoMetadeInvalida = sizes.find((x) => x.half_promo_price != null && !(x.half_promo_price > 0));
+      if (promoMetadeInvalida) {
+        return mostrar("A promoção da metade de " + promoMetadeInvalida.name + " precisa ser maior que zero.");
+      }
+      const promoMetadeAlta = sizes.find((x) => x.half_promo_price != null && x.half_promo_price >= x.half_price);
+      if (promoMetadeAlta) {
+        return mostrar("A promoção da metade de " + promoMetadeAlta.name + " precisa ser menor que o preço da metade.");
+      }
+
       price = Math.min.apply(null, sizes.map((s) => s.price));
       promo = null;                       // promoção de pizza vive em cada tamanho
     } else {
@@ -1048,7 +1101,11 @@
       if (promo != null && promo >= price) return mostrar("O preço promocional precisa ser menor que o preço normal.");
     }
 
-    const temPromo = (promo != null) || sizes.some((s) => s.promo_price != null);
+    /* A promoção da metade usa a MESMA janela promo_start/promo_end do
+       produto — não existe período separado. Por isso ela conta aqui:
+       preencher só a promo da metade e nenhuma data deixaria o desconto
+       sem período, exatamente como já acontecia com a promo inteira. */
+    const temPromo = (promo != null) || sizes.some((s) => s.promo_price != null || s.half_promo_price != null);
     if (temPromo && !form.inicio && !form.fim) {
       return mostrar("Informe quando a promoção começa ou termina — sem período, o desconto não aparece no cardápio.");
     }

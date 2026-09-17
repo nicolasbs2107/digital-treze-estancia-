@@ -457,8 +457,31 @@ select.entrada{ appearance:none; background-image:none; }
 }
 .linha-item .campos{ display:grid; gap:8px; }
 @media (min-width:480px){
-  .linha-item .campos.tamanho{ grid-template-columns:1.4fr 1fr 1fr; }
   .linha-item .campos.opcional{ grid-template-columns:1.6fr 1fr; }
+}
+
+/* Tamanho: nome e detalhe ocupam a linha toda; os quatro preços
+   (inteiro, metade, promo inteira, promo metade) dividem o resto.
+   No celular tudo empilha em uma coluna — minmax(0,1fr) é o que impede
+   um campo de esticar a linha e criar rolagem lateral. */
+.linha-item .campos.tamanho{ grid-template-columns:minmax(0,1fr); }
+.linha-item .campos.tamanho .largura-total{ grid-column:1 / -1; }
+@media (min-width:480px){
+  .linha-item .campos.tamanho{ grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (min-width:720px){
+  .linha-item .campos.tamanho{ grid-template-columns:repeat(4,minmax(0,1fr)); }
+}
+/* os rótulos dos preços são mais longos que os antigos ("Promo metade"):
+   uma pitada a menos de espaçamento evita a quebra em duas linhas */
+.linha-item .campos.tamanho .mini-rotulo{ letter-spacing:.03em; white-space:nowrap; }
+.dica-meio{ margin-top:10px; }
+/* No celular o tamanho vira seis campos empilhados e o × centralizado
+   fica solto no meio do cartão. Encostado no topo ele continua ao lado
+   do campo "Tamanho", que é justamente o que o botão remove. No desktop
+   nada muda: lá o cartão tem três linhas e o centro já funciona. */
+@media (max-width:479px){
+  .linha-item.linha-tamanho .remover-item{ align-self:start; margin-top:17px; }
 }
 .linha-item input{
   width:100%; padding:9px 11px; border:1px solid var(--linha);

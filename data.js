@@ -85,7 +85,7 @@ window.Cardapio = (function () {
     const h = hostnameAtual().toLowerCase();
     if (!h) return true;                              // sem hostname: não é um site publicado
     return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" ||
-           h === "::1" || h === "[::1]" || /\.localhost$/.test(h);
+      h === "::1" || h === "[::1]" || /\.localhost$/.test(h);
   }
 
   /* Lido SÓ em host local. Em produção esta função nem é chamada. */
@@ -224,12 +224,12 @@ window.Cardapio = (function () {
     const medido = typeof ida === "number" && typeof volta === "number" && volta >= ida;
 
     RELOGIO.epocaServidorNaSync = doBanco.getTime();
-    RELOGIO.monotonicoNaSync    = medido ? ida + (volta - ida) / 2 : monotonico();
-    RELOGIO.rttMs               = medido ? Math.round(volta - ida) : null;
-    RELOGIO.deslocamentoMs      = doBanco.getTime() - Date.now();
-    RELOGIO.origem              = "servidor";
-    RELOGIO.confiavel           = true;
-    RELOGIO.sincronizadoEm      = doBanco.toISOString();
+    RELOGIO.monotonicoNaSync = medido ? ida + (volta - ida) / 2 : monotonico();
+    RELOGIO.rttMs = medido ? Math.round(volta - ida) : null;
+    RELOGIO.deslocamentoMs = doBanco.getTime() - Date.now();
+    RELOGIO.origem = "servidor";
+    RELOGIO.confiavel = true;
+    RELOGIO.sincronizadoEm = doBanco.toISOString();
     return true;
   }
 
@@ -261,7 +261,7 @@ window.Cardapio = (function () {
      ------------------------------------------------------------------ */
   function janelaAberta(produto, agora) {
     const inicio = produto.promo_start ? new Date(produto.promo_start) : null;
-    const fim    = produto.promo_end   ? new Date(produto.promo_end)   : null;
+    const fim = produto.promo_end ? new Date(produto.promo_end) : null;
     if (!inicio && !fim) return false;                 // sem janela: não promove
     if (inicio && isNaN(inicio.getTime())) return false;
     if (fim && isNaN(fim.getTime())) return false;
@@ -272,7 +272,7 @@ window.Cardapio = (function () {
 
   function promocaoValida(normal, promocional) {
     return typeof promocional === "number" && promocional > 0 &&
-           typeof normal === "number" && promocional < normal;
+      typeof normal === "number" && promocional < normal;
   }
 
   /* Devolve { preco, precoNormal, emPromocao } para um par de valores. */
@@ -328,8 +328,10 @@ window.Cardapio = (function () {
       return mapearEntrega(cfg.data, zonas.data || []);
     } catch (e) {
       console.warn("[cardápio] configurações de entrega indisponíveis:", (e && e.message) || e);
-      return { erro: true, enabled: false, feeMode: "confirm", fixedFee: null, minOrder: 0,
-               freeDeliveryAbove: null, allowUnlistedNeighborhoods: true, zones: [] };
+      return {
+        erro: true, enabled: false, feeMode: "confirm", fixedFee: null, minOrder: 0,
+        freeDeliveryAbove: null, allowUnlistedNeighborhoods: true, zones: []
+      };
     }
   }
 
@@ -399,7 +401,7 @@ window.Cardapio = (function () {
 
     const dias = [0, 1, 2, 3, 4, 5, 6].map(function (n) {
       const d = porDia[n];
-      const abre  = d ? minutosDoRelogio(d.opens_at)  : null;
+      const abre = d ? minutosDoRelogio(d.opens_at) : null;
       const fecha = d ? minutosDoRelogio(d.closes_at) : null;
       /* dia só conta como aberto se o banco disser E os dois horários
          estiverem legíveis — sem horário, tratamos como fechado */
@@ -453,13 +455,13 @@ window.Cardapio = (function () {
       logoUrl: urlDoBucket(logoPath, versao),
       faviconUrl: urlDoBucket(faviconPath, versao),
       endereco: {
-        rua:         texto(linha, "address_street"),
-        numero:      texto(linha, "address_number"),
-        bairro:      texto(linha, "address_neighborhood"),
+        rua: texto(linha, "address_street"),
+        numero: texto(linha, "address_number"),
+        bairro: texto(linha, "address_neighborhood"),
         complemento: texto(linha, "address_complement"),
-        cidade:      texto(linha, "address_city"),
-        estado:      texto(linha, "address_state").toUpperCase(),
-        cep:         texto(linha, "address_postal_code")
+        cidade: texto(linha, "address_city"),
+        estado: texto(linha, "address_state").toUpperCase(),
+        cep: texto(linha, "address_postal_code")
       }
     };
   }
@@ -488,9 +490,9 @@ window.Cardapio = (function () {
     let s = String(valor == null ? "" : valor).trim();
     if (!s) return "";
     s = s.split(/[?#]/)[0]
-         .replace(/^https?:\/\//i, "").replace(/^www\./i, "")
-         .replace(/^(?:instagram\.com|instagr\.am)\//i, "")
-         .replace(/^@+/, "").replace(/\/+$/, "").replace(/\s+/g, "");
+      .replace(/^https?:\/\//i, "").replace(/^www\./i, "")
+      .replace(/^(?:instagram\.com|instagr\.am)\//i, "")
+      .replace(/^@+/, "").replace(/\/+$/, "").replace(/\s+/g, "");
     return /^[A-Za-z0-9._]{1,30}$/.test(s) ? s : "";
   }
 
@@ -512,8 +514,8 @@ window.Cardapio = (function () {
     const e = endereco || {};
     const v = (x) => String(x == null ? "" : x).trim();
     const rua = v(e.rua), numero = v(e.numero), bairro = v(e.bairro),
-          complemento = v(e.complemento), cidade = v(e.cidade),
-          estado = v(e.estado).toUpperCase(), cep = v(e.cep);
+      complemento = v(e.complemento), cidade = v(e.cidade),
+      estado = v(e.estado).toUpperCase(), cep = v(e.cep);
 
     const logradouro = rua ? (numero ? rua + ", " + numero : rua) : "";
     const local = [cidade, estado].filter(Boolean).join(" — ");
@@ -582,18 +584,39 @@ window.Cardapio = (function () {
     (texto(o, "name", "nome").toLowerCase().normalize("NFD").replace(/[^a-z0-9]+/g, "-")) ||
     (prefixo + indice);
 
+  /* Cada tamanho carrega DOIS preços independentes: o da pizza inteira e
+     o da metade, usado na montagem do meio a meio.
+
+     O preço da metade NUNCA é calculado — nada aqui divide `price` por
+     dois. Ele existe se, e somente se, o painel gravou half_price, e
+     vale exatamente o que foi gravado. half_price ausente, nulo, não
+     numérico ou <= 0 significa uma coisa só: este tamanho deste sabor
+     não participa do meio a meio, e os três campos saem nulos/false.
+
+     A promoção da metade usa a MESMA janela promo_start/promo_end do
+     produto e a MESMA resolverPreco() do preço inteiro — não existe
+     período separado nem regra paralela. */
   function mapearTamanhos(produto, agora) {
     return lista(produto.sizes).map(function (t, i) {
       const normal = numero(t, "price", "preco");
       const promo = numero(t, "promo_price", "preco_promocional");
       const r = resolverPreco(normal, promo, produto, agora);
+
+      const metadeNormal = numero(t, "half_price", "preco_metade");
+      const metadePromo = numero(t, "half_promo_price", "preco_promocional_metade");
+      const temMetade = typeof metadeNormal === "number" && metadeNormal > 0;
+      const m = temMetade ? resolverPreco(metadeNormal, metadePromo, produto, agora) : null;
+
       return {
         id: identificador(t, i, "tam-"),
         nome: texto(t, "name", "nome") || "Tamanho " + (i + 1),
         detalhe: texto(t, "detail", "detalhe", "description"),
         preco: r.preco,
         precoNormal: r.precoNormal,
-        emPromocao: r.emPromocao
+        emPromocao: r.emPromocao,
+        precoMetade: m ? m.preco : null,
+        precoMetadeNormal: m ? m.precoNormal : null,
+        metadeEmPromocao: m ? m.emPromocao : false
       };
     }).filter((t) => typeof t.preco === "number");
   }
@@ -681,7 +704,7 @@ window.Cardapio = (function () {
      · um turno com closes_at <= opens_at (ex.: 18:00 → 02:00) termina no
        DIA SEGUINTE, então o turno de ONTEM também é examinado.
      ------------------------------------------------------------------ */
-  const DIAS_NOME  = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
+  const DIAS_NOME = ["domingo", "segunda", "terça", "quarta", "quinta", "sexta", "sábado"];
   const DIAS_ABREV = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
   const INDICE_SEMANA = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
@@ -707,9 +730,11 @@ window.Cardapio = (function () {
     catch (e) {
       try { return ler(FUSO_PADRAO); }
       catch (e2) {
-        return { dia: instante.getDay(),
-                 minutos: instante.getHours() * 60 + instante.getMinutes(),
-                 timezone: null };
+        return {
+          dia: instante.getDay(),
+          minutos: instante.getHours() * 60 + instante.getMinutes(),
+          timezone: null
+        };
       }
     }
   }
@@ -721,10 +746,12 @@ window.Cardapio = (function () {
        hora: com o relógio do servidor fora do ar não dizemos se a casa
        está aberta, apenas que não foi possível confirmar. */
     if (!horarios || horarios.erro || horarios.relogioConfiavel === false ||
-        !horarios.dias || horarios.dias.length !== 7) {
-      return { erro: true, aberto: false, texto: "Horário indisponível", detalhe: "",
-               timezone: (horarios && horarios.timezone) || FUSO_PADRAO,
-               fechaEm: null, proximaAbertura: null, agora: null };
+      !horarios.dias || horarios.dias.length !== 7) {
+      return {
+        erro: true, aberto: false, texto: "Horário indisponível", detalhe: "",
+        timezone: (horarios && horarios.timezone) || FUSO_PADRAO,
+        fechaEm: null, proximaAbertura: null, agora: null
+      };
     }
 
     const tz = horarios.timezone || FUSO_PADRAO;
@@ -750,10 +777,12 @@ window.Cardapio = (function () {
     }
 
     if (aberto) {
-      return { erro: false, aberto: true, texto: "Aberto agora",
-               detalhe: "Fecha às " + formatarHora(fechaEm),
-               timezone: p.timezone || tz, fechaEm: fechaEm,
-               proximaAbertura: null, agora: { dia: p.dia, minutos: p.minutos } };
+      return {
+        erro: false, aberto: true, texto: "Aberto agora",
+        detalhe: "Fecha às " + formatarHora(fechaEm),
+        timezone: p.timezone || tz, fechaEm: fechaEm,
+        proximaAbertura: null, agora: { dia: p.dia, minutos: p.minutos }
+      };
     }
 
     /* 3. próxima abertura: hoje (se ainda não começou) ou o próximo dia
@@ -773,10 +802,12 @@ window.Cardapio = (function () {
       break;
     }
 
-    return { erro: false, aberto: false, texto: "Fechado no momento",
-             detalhe: proxima ? "Abre " + proxima.texto : "",
-             timezone: p.timezone || tz, fechaEm: null,
-             proximaAbertura: proxima, agora: { dia: p.dia, minutos: p.minutos } };
+    return {
+      erro: false, aberto: false, texto: "Fechado no momento",
+      detalhe: proxima ? "Abre " + proxima.texto : "",
+      timezone: p.timezone || tz, fechaEm: null,
+      proximaAbertura: proxima, agora: { dia: p.dia, minutos: p.minutos }
+    };
   }
 
   /* ---------- 7. CARREGAMENTO --------------------------------------- */
@@ -835,6 +866,49 @@ window.Cardapio = (function () {
     return buscarEntrega(tenantAtual().id);
   }
 
+  /* Releitura do CARDÁPIO, usada na conferência final antes do WhatsApp.
+
+     Enquanto o cliente monta o pedido — o que pode levar minutos ou
+     horas com a aba aberta — o painel pode ter mudado preço, preço da
+     metade, promoção, disponibilidade ou até apagado um tamanho. O MENU
+     que está na memória da página é uma fotografia do momento em que
+     ela carregou; conferir o carrinho contra ela seria conferir contra
+     o passado.
+
+     Aqui não existe caminho alternativo nenhum: o business_id vem de
+     tenantAtual(), exatamente o mesmo que o domínio resolveu no
+     carregamento. Nada de slug, nada de URL, nada de resolver empresa
+     de novo — o pedido termina na empresa em que começou.
+
+     As consultas e os adaptadores são os MESMOS do carregamento
+     (buscarCategorias/buscarProdutos, mapearCategorias/mapearProduto),
+     e o instante é agora(): é isso que faz promo_price e
+     half_promo_price serem resolvidos de novo, pela regra de sempre,
+     sem uma segunda lógica de preço em lugar nenhum.
+
+     Falha aqui PROPAGA. Não devolvemos cardápio pela metade nem o
+     antigo: quem chamou precisa saber que não deu, para bloquear o
+     envio em vez de mandar preço velho. */
+  async function recarregarMenu() {
+    const id = tenantAtual().id;
+    const instante = agora();
+
+    const [linhasCategorias, linhasProdutos] = await Promise.all([
+      buscarCategorias(id),
+      buscarProdutos(id)
+    ]);
+
+    const categorias = mapearCategorias(linhasCategorias);
+    const porUuid = {};
+    categorias.forEach(function (c) { porUuid[c.uuid] = c; });
+
+    return {
+      CATEGORIAS: categorias,
+      MENU: linhasProdutos.map((p) => mapearProduto(p, porUuid, instante)),
+      relidoEm: instante.toISOString()
+    };
+  }
+
   /* Idem para o horário: hora do servidor renovada + tabelas relidas. */
   async function recarregarHorarios() {
     await sincronizarRelogio();
@@ -865,23 +939,79 @@ window.Cardapio = (function () {
       const p = porId[item.produtoId];
 
       if (!p) {
-        problemas.push({ uid: item.uid, nome: item.nome, tipo: "produto-removido",
-          acao: "remover", aviso: item.nome + " saiu do cardápio e foi removido do pedido." });
+        problemas.push({
+          uid: item.uid, nome: item.nome, tipo: "produto-removido",
+          acao: "remover", aviso: item.nome + " saiu do cardápio e foi removido do pedido."
+        });
         return;
       }
       if (p.disponivel === false) {
-        problemas.push({ uid: item.uid, nome: p.nome, tipo: "indisponivel",
-          acao: "remover", aviso: p.nome + " está indisponível no momento." });
+        problemas.push({
+          uid: item.uid, nome: p.nome, tipo: "indisponivel",
+          acao: "remover", aviso: p.nome + " está indisponível no momento."
+        });
         return;
       }
 
-      /* tamanho */
+      /* tamanho e preço base */
       let precoBase = null;
-      if (p.tipo === "pizza") {
+
+      /* --- meio a meio: DOIS sabores para conferir ---
+         Um item antigo não tem esta chave, e ausência vale false: ele cai
+         inteiro no caminho de sempre, logo abaixo. */
+      if (item.meioAMeio === true) {
+        const p2 = porId[item.segundoProdutoId];
+        const nome2 = item.sabor2Nome || (p2 && p2.nome) || "o segundo sabor";
+        const rotulo = "Pizza meio a meio";
+
+        if (!item.segundoProdutoId || !p2) {
+          problemas.push({
+            uid: item.uid, nome: rotulo, tipo: "sabor2-removido", acao: "reconfigurar",
+            aviso: nome2 + " saiu do cardápio. Monte a pizza meio a meio novamente."
+          });
+          return;
+        }
+        if (p2.disponivel === false) {
+          problemas.push({
+            uid: item.uid, nome: rotulo, tipo: "sabor2-indisponivel", acao: "reconfigurar",
+            aviso: p2.nome + " está indisponível no momento. Monte a pizza meio a meio novamente."
+          });
+          return;
+        }
+
+        /* o MESMO tamanho precisa existir nos dois sabores */
+        const t1 = (p.opcoes.tamanhos || []).find((x) => x.id === item.tamanhoId);
+        const t2 = (p2.opcoes.tamanhos || []).find((x) => x.id === item.tamanhoId);
+        if (!t1 || !t2) {
+          problemas.push({
+            uid: item.uid, nome: rotulo, tipo: "tamanho-removido", acao: "reconfigurar",
+            aviso: "O tamanho escolhido não está mais disponível nos dois sabores. Monte a pizza meio a meio novamente."
+          });
+          return;
+        }
+
+        /* e os dois precisam continuar aceitando meio a meio naquele
+           tamanho — o dono pode ter apagado o preço da metade no painel */
+        const m1 = typeof t1.precoMetade === "number" && t1.precoMetade > 0;
+        const m2 = typeof t2.precoMetade === "number" && t2.precoMetade > 0;
+        if (!m1 || !m2) {
+          problemas.push({
+            uid: item.uid, nome: rotulo, tipo: "metade-indisponivel", acao: "reconfigurar",
+            aviso: (m1 ? p2.nome : p.nome) + " não é mais oferecido em meio a meio neste tamanho. Monte a pizza novamente."
+          });
+          return;
+        }
+
+        /* soma das DUAS metades — nunca o inteiro, nunca a média */
+        precoBase = t1.precoMetade + t2.precoMetade;
+
+      } else if (p.tipo === "pizza") {
         const t = p.opcoes.tamanhos.find((x) => x.id === item.tamanhoId);
         if (!t) {
-          problemas.push({ uid: item.uid, nome: p.nome, tipo: "tamanho-removido",
-            acao: "reconfigurar", aviso: "O tamanho escolhido para " + p.nome + " não existe mais. Monte o produto novamente." });
+          problemas.push({
+            uid: item.uid, nome: p.nome, tipo: "tamanho-removido",
+            acao: "reconfigurar", aviso: "O tamanho escolhido para " + p.nome + " não existe mais. Monte o produto novamente."
+          });
           return;
         }
         precoBase = t.preco;
@@ -894,8 +1024,10 @@ window.Cardapio = (function () {
       if (item.bordaId) {
         const b = p.opcoes.bordas.find((x) => x.id === item.bordaId);
         if (!b) {
-          problemas.push({ uid: item.uid, nome: p.nome, tipo: "borda-removida",
-            acao: "reconfigurar", aviso: "A borda escolhida para " + p.nome + " não está mais disponível. Monte o produto novamente." });
+          problemas.push({
+            uid: item.uid, nome: p.nome, tipo: "borda-removida",
+            acao: "reconfigurar", aviso: "A borda escolhida para " + p.nome + " não está mais disponível. Monte o produto novamente."
+          });
           return;
         }
         precoExtras += b.preco;
@@ -909,18 +1041,24 @@ window.Cardapio = (function () {
         else precoExtras += atual.preco;
       });
       if (sumidos.length) {
-        problemas.push({ uid: item.uid, nome: p.nome, tipo: "adicional-removido",
+        problemas.push({
+          uid: item.uid, nome: p.nome, tipo: "adicional-removido",
           acao: "reconfigurar",
-          aviso: "Estes adicionais de " + p.nome + " não existem mais: " + sumidos.join(", ") + ". Monte o produto novamente." });
+          aviso: "Estes adicionais de " + p.nome + " não existem mais: " + sumidos.join(", ") + ". Monte o produto novamente."
+        });
         return;
       }
 
-      /* preço */
+      /* preço — para o meio a meio, precoBase já é a soma das metades e
+         precoExtras veio do produto principal, cobrado uma única vez */
       if (precoBase !== item.precoBase || precoExtras !== item.precoExtras) {
-        problemas.push({ uid: item.uid, nome: p.nome, tipo: "preco-alterado", acao: "atualizar",
+        const rotulo = item.meioAMeio === true ? "a pizza meio a meio" : p.nome;
+        problemas.push({
+          uid: item.uid, nome: rotulo, tipo: "preco-alterado", acao: "atualizar",
           de: item.precoBase + item.precoExtras, para: precoBase + precoExtras,
           precoBase: precoBase, precoExtras: precoExtras,
-          aviso: "O preço de " + p.nome + " foi atualizado." });
+          aviso: "O preço de " + rotulo + " foi atualizado."
+        });
       }
     });
 
@@ -949,7 +1087,7 @@ window.Cardapio = (function () {
     if (dados.ENTREGA) {
       console.log("Entrega:    " + (dados.ENTREGA.erro ? "indisponível"
         : (dados.ENTREGA.enabled ? "ativa · modo " + dados.ENTREGA.feeMode +
-            " · " + dados.ENTREGA.zones.length + " bairro(s)" : "desativada")));
+          " · " + dados.ENTREGA.zones.length + " bairro(s)" : "desativada")));
     }
     if (dados.HORARIOS) {
       const h = dados.HORARIOS;
@@ -966,9 +1104,9 @@ window.Cardapio = (function () {
     console.log("Relógio:    " + RELOGIO.origem +
       (RELOGIO.confiavel
         ? " (RPC " + RPC_HORA + ", rtt " + (RELOGIO.rttMs == null ? "?" : RELOGIO.rttMs) + "ms" +
-          ", aparelho " + (RELOGIO.deslocamentoMs >= 0 ? "atrasado " : "adiantado ") +
-          Math.abs(Math.round(RELOGIO.deslocamentoMs / 1000)) + "s" +
-          "; avanço por relógio monotônico)"
+        ", aparelho " + (RELOGIO.deslocamentoMs >= 0 ? "atrasado " : "adiantado ") +
+        Math.abs(Math.round(RELOGIO.deslocamentoMs / 1000)) + "s" +
+        "; avanço por relógio monotônico)"
         : " — hora do servidor indisponível"));
     console.groupEnd();
   }
@@ -986,6 +1124,7 @@ window.Cardapio = (function () {
     recarregarEmpresa: recarregarEmpresa,
     recarregarEntrega: recarregarEntrega,
     recarregarHorarios: recarregarHorarios,
+    recarregarMenu: recarregarMenu,
     horariosIndisponiveis: horariosIndisponiveis,
     registrar: registrar,
     revalidarCarrinho: revalidarCarrinho,

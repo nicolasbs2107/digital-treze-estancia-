@@ -13,7 +13,7 @@
   "use strict";
 
   /* ---------- 1. UTILIDADES ----------------------------------------- */
-  const $  = (s, ctx) => (ctx || document).querySelector(s);
+  const $ = (s, ctx) => (ctx || document).querySelector(s);
   const $$ = (s, ctx) => Array.from((ctx || document).querySelectorAll(s));
 
   const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -22,7 +22,7 @@
   const esc = (s) => String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
-  const semAcento = (s) => String(s).normalize("NFD").split("").filter(function(c){var k=c.charCodeAt(0);return k<0x300||k>0x36f;}).join("").toLowerCase();
+  const semAcento = (s) => String(s).normalize("NFD").split("").filter(function (c) { var k = c.charCodeAt(0); return k < 0x300 || k > 0x36f; }).join("").toLowerCase();
 
 
   function hash(str) {
@@ -48,9 +48,15 @@
   function opcoesDo(p) {
     if (p.opcoes) return p.opcoes;
     return {
+      /* O cardápio local não tem preço de metade — e não inventamos um.
+         Os três campos saem nulos, o que faz o meio a meio simplesmente
+         não ser oferecido enquanto o site roda no fallback. */
       tamanhos: (OPCOES.tamanhos || [])
-        .map((t) => ({ id: t.id, nome: t.nome, detalhe: t.detalhe,
-                       preco: (p.precos || {})[t.id], precoNormal: (p.precos || {})[t.id], emPromocao: false }))
+        .map((t) => ({
+          id: t.id, nome: t.nome, detalhe: t.detalhe,
+          preco: (p.precos || {})[t.id], precoNormal: (p.precos || {})[t.id], emPromocao: false,
+          precoMetade: null, precoMetadeNormal: null, metadeEmPromocao: false
+        }))
         .filter((t) => typeof t.preco === "number"),
       bordas: (OPCOES.bordas || []).map((b) => ({ id: b.id, nome: b.nome, preco: b.preco })),
       adicionais: (OPCOES.adicionais || []).map((a) => ({ id: a.id, nome: a.nome, preco: a.preco }))
@@ -64,13 +70,17 @@
     if (tamanhos.length) {
       let melhor = tamanhos[0];
       tamanhos.forEach(function (t) { if (t.preco < melhor.preco) melhor = t; });
-      return { preco: melhor.preco,
-               normal: melhor.precoNormal != null ? melhor.precoNormal : melhor.preco,
-               promo: !!melhor.emPromocao };
+      return {
+        preco: melhor.preco,
+        normal: melhor.precoNormal != null ? melhor.precoNormal : melhor.preco,
+        promo: !!melhor.emPromocao
+      };
     }
-    return { preco: p.preco,
-             normal: p.precoNormal != null ? p.precoNormal : p.preco,
-             promo: !!p.emPromocao };
+    return {
+      preco: p.preco,
+      normal: p.precoNormal != null ? p.precoNormal : p.preco,
+      promo: !!p.emPromocao
+    };
   }
 
   function precoBase(p) { return precoInicial(p).preco; }
@@ -85,6 +95,67 @@
   const temTamanhos = (p) => opcoesDo(p).tamanhos.length > 0;
   const indisponivel = (p) => p.disponivel === false;
 
+  /* ---------- 1.1 MEIO A MEIO (2 sabores) ---------------------------
+     Toda a regra de "este sabor pode entrar numa pizza meio a meio?"
+     mora nestas poucas funções. O preço da metade vem pronto do
+     data.js (t.precoMetade) e é sempre o valor cadastrado no painel:
+     nada aqui divide preço por dois nem estima nada.
+     ------------------------------------------------------------------ */
+
+  /* Devolve o tamanho se ele aceita meio a meio; senão, null.
+     half_price ausente vira precoMetade null — e null não é zero: é
+     "este tamanho deste sabor não entra no meio a meio". */
+  const metadeDe = (t) => (t && typeof t.precoMetade === "number" && t.precoMetade > 0) ? t : null;
+
+  const tamanhoDe = (p, tamanhoId) =>
+    (p && tamanhoId) ? (opcoesDo(p).tamanhos.find((t) => t.id === tamanhoId) || null) : null;
+
+  /* Para o precoHTML: o par normal/vigente da METADE, no mesmo formato
+     que o resto do app já usa para riscar promoção. */
+  const infoMetade = (t) => ({
+    preco: t.precoMetade,
+    normal: t.precoMetadeNormal != null ? t.precoMetadeNormal : t.precoMetade,
+    promo: !!t.metadeEmPromocao
+  });
+
+  /* Quem pode ser o SEGUNDO sabor, dado o tamanho já escolhido.
+     Mesmo tamanhoId nos dois lados — nunca combinamos Grande com Média. */
+  function saboresCompativeis(base, tamanhoId) {
+    if (!base || !tamanhoId) return [];
+    return MENU.reduce(function (acc, q) {
+      if (!q || q.id === base.id) return acc;          // o próprio sabor 1 fica fora
+      if (indisponivel(q)) return acc;
+      const t = metadeDe(tamanhoDe(q, tamanhoId));
+      if (t) acc.push({ id: q.id, nome: q.nome, tamanho: t });
+      return acc;
+    }, []);
+  }
+
+  /* Só é possível oferecer meio a meio quando o sabor aberto tem metade
+     NESTE tamanho E existe pelo menos um companheiro compatível. */
+  function podeMeioAMeio(p, tamanhoId) {
+    if (!metadeDe(tamanhoDe(p, tamanhoId))) return false;
+    return saboresCompativeis(p, tamanhoId).length > 0;
+  }
+
+  /* Só para exibição: "Pizza Calabresa" lê melhor como "Calabresa" nas
+     linhas das metades. O nome guardado no produto nunca muda. */
+  function semPrefixoPizza(nome) {
+    const n = String(nome == null ? "" : nome).trim();
+    const curto = n.replace(/^pizza\s+/i, "").trim();
+    return curto || n;
+  }
+
+  /* Os dois nomes de um item meio a meio, ou null se o item não estiver
+     completo (item antigo, corrompido, etc.) — nesse caso não
+     inventamos metade nenhuma na tela. */
+  function metadesDoItem(i) {
+    if (!i || i.meioAMeio !== true) return null;
+    const a = semPrefixoPizza(i.sabor1Nome || "");
+    const b = semPrefixoPizza(i.sabor2Nome || "");
+    return (a && b) ? { a: a, b: b } : null;
+  }
+
   /* ---------- 2. ILUSTRAÇÕES (usadas enquanto não há fotos) ---------- */
   let uidArte = 0;
 
@@ -95,13 +166,13 @@
     const a = p.arte || { tipo: "pizza", massa: "#E9BB6A", base: "#E0C38B", itens: [] };
     const uid = "a" + (uidArte++);
     const corpo = a.tipo === "pizza" ? pizzaSVG(a, hash(p.id), uid)
-                : a.tipo === "lata"  ? bebidaSVG(a, uid, "lata")
-                :                      bebidaSVG(a, uid, "garrafa");
+      : a.tipo === "lata" ? bebidaSVG(a, uid, "lata")
+        : bebidaSVG(a, uid, "garrafa");
     let h = '<svg viewBox="0 0 200 200" role="img" aria-label="Ilustração de ' + esc(p.nome) +
-            '" preserveAspectRatio="xMidYMid slice">' + corpo + "</svg>";
+      '" preserveAspectRatio="xMidYMid slice">' + corpo + "</svg>";
     if (p.imagem) {
       h += '<img class="foto-real" src="' + esc(p.imagem) + '" alt="' + esc(p.nome) +
-           '" loading="lazy" decoding="async">';
+        '" loading="lazy" decoding="async">';
     }
     return h;
   }
@@ -123,16 +194,16 @@
 
   function fundoDefs(uid, c1, c2) {
     return '<defs><radialGradient id="bg' + uid + '" cx="30%" cy="20%" r="95%">' +
-           '<stop offset="0%" stop-color="' + c1 + '"/><stop offset="100%" stop-color="' + c2 + '"/>' +
-           "</radialGradient></defs>";
+      '<stop offset="0%" stop-color="' + c1 + '"/><stop offset="100%" stop-color="' + c2 + '"/>' +
+      "</radialGradient></defs>";
   }
 
   function pizzaSVG(a, seed, uid) {
     const r = rngFrom(seed);
     let s = fundoDefs(uid, "#F7EEDD", "#E3CDA9");
     s += '<defs><radialGradient id="m' + uid + '" cx="38%" cy="32%" r="80%">' +
-         '<stop offset="0%" stop-color="' + clarear(a.massa, 18) + '"/>' +
-         '<stop offset="100%" stop-color="' + a.massa + '"/></radialGradient></defs>';
+      '<stop offset="0%" stop-color="' + clarear(a.massa, 18) + '"/>' +
+      '<stop offset="100%" stop-color="' + a.massa + '"/></radialGradient></defs>';
     s += '<rect width="200" height="200" fill="url(#bg' + uid + ')"/>';
     s += '<circle cx="100" cy="104" r="84" fill="rgba(90,50,20,.18)"/>';
     s += '<circle cx="100" cy="100" r="84" fill="url(#m' + uid + ')"/>';
@@ -153,25 +224,25 @@
           s += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (t / 2) + '" fill="' + it.cor + '"' + stroke + "/>";
         } else if (it.forma === "anel") {
           s += '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="' + (t / 2) +
-               '" fill="none" stroke="' + it.cor + '" stroke-width="2.4" opacity=".95"/>';
+            '" fill="none" stroke="' + it.cor + '" stroke-width="2.4" opacity=".95"/>';
         } else if (it.forma === "quadrado") {
           s += '<rect x="' + (x - t / 2).toFixed(1) + '" y="' + (y - t / 2).toFixed(1) + '" width="' + t + '" height="' + t +
-               '" rx="2.5" fill="' + it.cor + '"' + stroke + ' transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')"/>';
+            '" rx="2.5" fill="' + it.cor + '"' + stroke + ' transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')"/>';
         } else if (it.forma === "gota") {
           s += '<ellipse cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" rx="' + (t / 2) + '" ry="' + (t / 2.7).toFixed(1) +
-               '" fill="' + it.cor + '"' + stroke + ' transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')"/>';
+            '" fill="' + it.cor + '"' + stroke + ' transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')"/>';
         } else if (it.forma === "folha") {
           const k = (t / 12).toFixed(2);
           s += '<path d="M0,-6 C4.2,-2.6 4.2,2.6 0,6 C-4.2,2.6 -4.2,-2.6 0,-6 Z" fill="' + it.cor +
-               '" transform="translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ') rotate(' + g + ') scale(' + k + ')"/>';
+            '" transform="translate(' + x.toFixed(1) + ' ' + y.toFixed(1) + ') rotate(' + g + ') scale(' + k + ')"/>';
         } else if (it.forma === "raspa") {
           s += '<rect x="' + (x - t / 2).toFixed(1) + '" y="' + (y - 1).toFixed(1) + '" width="' + t + '" height="2" rx="1" fill="' + it.cor +
-               '" transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')" opacity=".9"/>';
+            '" transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')" opacity=".9"/>';
         } else if (it.forma === "fio") {
           const dx = t, dy = t * 0.5;
           s += '<path d="M' + (x - dx / 2).toFixed(1) + ',' + y.toFixed(1) + ' q' + (dx / 2).toFixed(1) + ',' + (-dy).toFixed(1) +
-               ' ' + dx.toFixed(1) + ',0" fill="none" stroke="' + it.cor + '" stroke-width="3" stroke-linecap="round"' +
-               ' transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')" opacity=".92"/>';
+            ' ' + dx.toFixed(1) + ',0" fill="none" stroke="' + it.cor + '" stroke-width="3" stroke-linecap="round"' +
+            ' transform="rotate(' + g + ' ' + x.toFixed(1) + ' ' + y.toFixed(1) + ')" opacity=".92"/>';
         }
       }
     });
@@ -221,7 +292,7 @@
     } catch (e) { carrinho = []; }
   }
   function salvarCarrinho() {
-    try { localStorage.setItem(CHAVE, JSON.stringify(carrinho)); } catch (e) {}
+    try { localStorage.setItem(CHAVE, JSON.stringify(carrinho)); } catch (e) { }
   }
 
   const unitario = (i) => i.precoBase + i.precoExtras;
@@ -235,10 +306,20 @@
     return { subtotal: sub, extras: extras, total: sub + extras, itens: itens };
   }
 
+  /* Duas pizzas só se juntam no carrinho quando são a MESMA coisa.
+
+     O prefixo "inteira:" / "meio:" impede que uma Calabresa inteira se
+     junte a uma meio a meio que começa em Calabresa. E os dois ids dos
+     sabores são ORDENADOS antes de entrar na assinatura, porque
+     Calabresa+Portuguesa e Portuguesa+Calabresa são a mesma pizza —
+     sem isso, a ordem em que o cliente clicou viraria duas linhas. */
   function assinatura(i) {
-    return [i.produtoId, i.tamanhoId || "", i.bordaId || "",
-            (i.adicionais || []).map((a) => a.id).sort().join(","),
-            (i.obs || "").trim().toLowerCase()].join("|");
+    const sabores = i.meioAMeio === true
+      ? "meio:" + [String(i.produtoId || ""), String(i.segundoProdutoId || "")].sort().join("+")
+      : "inteira:" + String(i.produtoId || "");
+    return [sabores, i.tamanhoId || "", i.bordaId || "",
+      (i.adicionais || []).map((a) => a.id).sort().join(","),
+      (i.obs || "").trim().toLowerCase()].join("|");
   }
 
   function adicionarItem(item) {
@@ -313,10 +394,10 @@
     };
   }
 
-  const nomeEmpresa   = () => (EMPRESA && EMPRESA.nome) || CONFIG.nomeCompleto || "";
-  const numeroWhats   = () => (EMPRESA && EMPRESA.whatsappValido) ? EMPRESA.whatsapp : "";
+  const nomeEmpresa = () => (EMPRESA && EMPRESA.nome) || CONFIG.nomeCompleto || "";
+  const numeroWhats = () => (EMPRESA && EMPRESA.whatsappValido) ? EMPRESA.whatsapp : "";
   const SEM_WHATS = "Não foi possível carregar o WhatsApp do estabelecimento. " +
-                    "Tente novamente em alguns instantes.";
+    "Tente novamente em alguns instantes.";
 
   /* Passa os dados da empresa para os textos da página. CONFIG vira um
      espelho do banco — nada aqui reescreve o banco. */
@@ -419,8 +500,8 @@
       ? window.Cardapio.formatarEndereco(bruto)
       : { linhas: [], resumo: "", vazio: true, podeMapear: false, mapaUrl: "" };
     f.resumoCidade = [String(bruto.cidade || "").trim(),
-                      String(bruto.estado || "").trim().toUpperCase()]
-                     .filter(Boolean).join(" — ");
+    String(bruto.estado || "").trim().toUpperCase()]
+      .filter(Boolean).join(" — ");
     return f;
   }
 
@@ -483,7 +564,7 @@
     if (!nome) return;
     const corte = nome.indexOf(" ");
     const inicio = corte > 0 ? nome.slice(0, corte) : nome;
-    const resto  = corte > 0 ? nome.slice(corte + 1) : "";
+    const resto = corte > 0 ? nome.slice(corte + 1) : "";
     el.innerHTML = esc(inicio) + (resto ? "<span>" + esc(resto) + "</span>" : "");
   }
 
@@ -510,8 +591,10 @@
         : { dia: i, fechado: true, abre: null, fecha: null });
     }
     /* no modo local o relógio do aparelho É a referência declarada */
-    return { erro: false, timezone: CONFIG.timezone || "America/Sao_Paulo",
-             aceitarPedidosFechado: true, dias: dias, relogioConfiavel: true };
+    return {
+      erro: false, timezone: CONFIG.timezone || "America/Sao_Paulo",
+      aceitarPedidosFechado: true, dias: dias, relogioConfiavel: true
+    };
   }
 
   const horaTexto = (min) =>
@@ -519,8 +602,10 @@
       ? window.Cardapio.formatarHora(min)
       : String(Math.floor(min / 60)).padStart(2, "0") + ":" + String(min % 60).padStart(2, "0");
 
-  const DESCONHECIDO = { erro: true, aberto: false, texto: "Horário indisponível",
-                         detalhe: "", proximaAbertura: null, agora: null };
+  const DESCONHECIDO = {
+    erro: true, aberto: false, texto: "Horário indisponível",
+    detalhe: "", proximaAbertura: null, agora: null
+  };
 
   function statusLoja() {
     if (!HORARIOS || !window.Cardapio || !window.Cardapio.calcularStatusFuncionamento) return DESCONHECIDO;
@@ -536,7 +621,7 @@
     el.classList.toggle("esta-fechado", !s.aberto);
     el.classList.toggle("status-incerto", !!s.erro);
     el.innerHTML = '<span class="ponto"></span><span>' + esc(s.texto) + "</span>" +
-                   (s.detalhe ? '<small>· ' + esc(s.detalhe) + "</small>" : "");
+      (s.detalhe ? '<small>· ' + esc(s.detalhe) + "</small>" : "");
   }
 
   function renderHorarios() {
@@ -554,8 +639,10 @@
     const s = statusLoja();
     const hoje = s.agora ? s.agora.dia : -1;
     const abertos = HORARIOS.dias.filter((d) => !d.fechado).map(function (d) {
-      return { i: d.dia, txt: horaTexto(d.abre) + " às " + horaTexto(d.fecha),
-               vira: d.fecha <= d.abre };
+      return {
+        i: d.dia, txt: horaTexto(d.abre) + " às " + horaTexto(d.fecha),
+        vira: d.fecha <= d.abre
+      };
     });
     const fechados = HORARIOS.dias.filter((d) => d.fechado).map((d) => DIAS_CURTO[d.dia]);
 
@@ -579,11 +666,11 @@
     if (!lista) return;
     lista.innerHTML = (abertos.length
       ? abertos.map(function (d) {
-          return '<div class="linha-horario' + (d.i === hoje ? " hoje" : "") + '">' +
-                 "<span>" + DIAS_CURTO[d.i] + "</span><span>" + esc(d.txt) +
-                 (d.vira ? '<small class="vira-dia" title="Fecha no dia seguinte"> +1</small>' : "") +
-                 "</span></div>";
-        }).join("")
+        return '<div class="linha-horario' + (d.i === hoje ? " hoje" : "") + '">' +
+          "<span>" + DIAS_CURTO[d.i] + "</span><span>" + esc(d.txt) +
+          (d.vira ? '<small class="vira-dia" title="Fecha no dia seguinte"> +1</small>' : "") +
+          "</span></div>";
+      }).join("")
       : "") +
       (fechados.length ? '<div class="linha-horario folga"><span>' + fechados.join(", ") +
         "</span><span>Fechado</span></div>" : "");
@@ -614,9 +701,11 @@
     if (s.erro) return NAO_CONFIRMADO;
     if (!s.aberto) {
       const volta = s.proximaAbertura ? " Voltamos a atender " + s.proximaAbertura.texto + "." : "";
-      return { bloqueia: true, motivo: "fechado", titulo: "Estamos fechados no momento.",
-               mensagem: ("Estamos fechados no momento." + volta).trim(),
-               complemento: (volta ? volta.trim() + " " : "") + "Você pode montar seu pedido e finalizar quando abrirmos." };
+      return {
+        bloqueia: true, motivo: "fechado", titulo: "Estamos fechados no momento.",
+        mensagem: ("Estamos fechados no momento." + volta).trim(),
+        complemento: (volta ? volta.trim() + " " : "") + "Você pode montar seu pedido e finalizar quando abrirmos."
+      };
     }
     return SEM_BLOQUEIO;
   }
@@ -660,19 +749,19 @@
     return '<button class="produto' + (fora ? " esgotado" : "") + '" type="button" data-produto="' + esc(p.id) + '"' +
       (fora ? ' aria-disabled="true"' : "") + ">" +
       '<span class="produto-foto">' + arte(p) +
-        (fora ? '<span class="selo-esgotado">Esgotado</span>'
-              : (p.destaque ? '<span class="selo-destaque">Destaque</span>' : "")) +
+      (fora ? '<span class="selo-esgotado">Esgotado</span>'
+        : (p.destaque ? '<span class="selo-destaque">Destaque</span>' : "")) +
       "</span>" +
       '<span class="produto-corpo">' +
-        '<span class="produto-nome">' + esc(p.nome) + "</span>" +
-        '<span class="produto-desc">' + esc(p.descricao) + "</span>" +
-        '<span class="produto-rodape">' +
-          '<span class="produto-preco">' + precoHTML(info, legenda) + "</span>" +
-          (fora ? '<span class="produto-add desativado">Indisponível</span>'
-                : '<span class="produto-add">Adicionar <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>') +
-        "</span>" +
+      '<span class="produto-nome">' + esc(p.nome) + "</span>" +
+      '<span class="produto-desc">' + esc(p.descricao) + "</span>" +
+      '<span class="produto-rodape">' +
+      '<span class="produto-preco">' + precoHTML(info, legenda) + "</span>" +
+      (fora ? '<span class="produto-add desativado">Indisponível</span>'
+        : '<span class="produto-add">Adicionar <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span>') +
       "</span>" +
-    "</button>";
+      "</span>" +
+      "</button>";
   }
 
   function renderCardapio() {
@@ -684,7 +773,7 @@
         '<div class="secao-titulo"><h2>' + c.icone + " " + esc(c.nome) + "</h2>" +
         '<span class="contagem">' + itens.length + (itens.length === 1 ? " item" : " itens") + "</span></div>" +
         '<div class="grade">' + itens.map(cardProduto).join("") + "</div>" +
-      "</section>";
+        "</section>";
     }).join("");
     prepararFotos(alvo);
   }
@@ -729,10 +818,10 @@
     $("#rail-categorias").innerHTML = "";
     $("#lista-cardapio").innerHTML =
       '<div class="cardapio-erro" role="alert">' +
-        '<div class="icone" aria-hidden="true">🍕</div>' +
-        "<strong>Não foi possível carregar o cardápio no momento.</strong>" +
-        "<p>Tente novamente em alguns instantes.</p>" +
-        '<button type="button" class="btn btn-principal" id="tentar-novamente">Tentar novamente</button>' +
+      '<div class="icone" aria-hidden="true">🍕</div>' +
+      "<strong>Não foi possível carregar o cardápio no momento.</strong>" +
+      "<p>Tente novamente em alguns instantes.</p>" +
+      '<button type="button" class="btn btn-principal" id="tentar-novamente">Tentar novamente</button>' +
       "</div>";
   }
 
@@ -846,7 +935,7 @@
   function renderRail() {
     $("#rail-categorias").innerHTML = CATEGORIAS.map(function (c, k) {
       return '<button class="categoria-btn" type="button" data-cat="' + c.id + '" aria-current="' + (k === 0) + '">' +
-             '<span aria-hidden="true">' + c.icone + "</span>" + esc(c.nome) + "</button>";
+        '<span aria-hidden="true">' + c.icone + "</span>" + esc(c.nome) + "</button>";
     }).join("");
   }
 
@@ -882,6 +971,10 @@
      carrinho é conferido contra o cardápio recém-carregado e de novo
      antes de abrir o WhatsApp.
      ------------------------------------------------------------------ */
+  /* opcoes: opcoesDo(p) é entregue INTEIRO, sem reconstruir os tamanhos.
+     É o que faz precoMetade / precoMetadeNormal / metadeEmPromocao
+     chegarem à revalidação — um map que copiasse campo a campo
+     descartaria justamente os que o meio a meio precisa conferir. */
   function menuNormalizado() {
     return MENU.map(function (p) {
       return {
@@ -892,6 +985,18 @@
         opcoes: opcoesDo(p)
       };
     });
+  }
+
+  /* Só o que o cardápio MOSTRA: serve para decidir se vale redesenhar a
+     lista depois de uma releitura. Não é conferência de pedido — quem
+     confere item por item é revalidarCarrinho(), no data.js. */
+  function impressaoDoMenu(lista) {
+    try {
+      return JSON.stringify((lista || []).map(function (p) {
+        return [p.id, p.nome, p.categoria, p.disponivel !== false,
+        p.preco, p.precos, p.precosNormais, p.emPromocao];
+      }));
+    } catch (e) { return String(Math.random()); }   // na dúvida, redesenha
   }
 
   function revalidarCarrinhoSalvo(silencioso) {
@@ -979,18 +1084,45 @@
     const bordaPadrao = op.bordas.length
       ? (op.bordas.find((b) => !b.preco) || op.bordas[0]).id
       : null;
-    sel = { p: p, tamanho: null, borda: bordaPadrao, adicionais: [], obs: "", qtd: 1 };
+    /* modoSabores nasce em "inteira": o fluxo de pizza inteira continua
+       sendo o padrão e um produto simples nunca sai dele. */
+    sel = {
+      p: p, tamanho: null, modoSabores: "inteira", segundoSaborId: null,
+      borda: bordaPadrao, adicionais: [], obs: "", qtd: 1
+    };
     $("#produto-titulo").textContent = temTamanhos(p) ? "Monte sua pizza" : "Adicionar item";
     renderProdutoFolha();
     abrirFolha("#folha-produto");
   }
+
+  /* Verdadeiro só quando o produto tem tamanhos E o cliente escolheu
+     2 sabores. Produto simples nunca chega aqui como "meio". */
+  const ehMeioAMeio = () =>
+    !!sel && sel.modoSabores === "meio" && opcoesDo(sel.p).tamanhos.length > 0;
 
   function precoSelecionado() {
     if (!sel) return { base: 0, extras: 0, unit: 0, total: 0 };
     const p = sel.p;
     const op = opcoesDo(p);
     const tam = op.tamanhos.find((t) => t.id === sel.tamanho);
-    const base = op.tamanhos.length ? (tam ? tam.preco : 0) : p.preco;
+
+    let base;
+    if (!op.tamanhos.length) {
+      base = p.preco;                                  // produto simples: nada muda
+    } else if (ehMeioAMeio()) {
+      /* A pizza é a soma das DUAS metades cadastradas. Não é o sabor
+         mais caro, não é média, não é metade do inteiro. Enquanto o
+         segundo sabor não existir, a base é 0 e o botão fica travado. */
+      const m1 = metadeDe(tam);
+      const s2 = sel.segundoSaborId ? produtoPorId(sel.segundoSaborId) : null;
+      const m2 = s2 ? metadeDe(tamanhoDe(s2, sel.tamanho)) : null;
+      base = (m1 && m2) ? m1.precoMetade + m2.precoMetade : 0;
+    } else {
+      base = tam ? tam.preco : 0;
+    }
+
+    /* Bordas e adicionais vêm do produto principal e entram UMA vez,
+       ter dois sabores não dobra nada. */
     let extras = 0;
     const b = op.bordas.find((x) => x.id === sel.borda);
     if (b) extras += b.preco;
@@ -1012,11 +1144,90 @@
       '<span class="opcao-texto"><span class="opcao-nome">' + esc(nome) + "</span>" +
       (det ? '<span class="opcao-det">' + esc(det) + "</span>" : "") + "</span>" +
       '<span class="opcao-preco dinheiro' + (preco > 0 ? "" : " gratis") + '">' + valor + "</span>" +
-    "</div>";
+      "</div>";
   }
 
   function guardarObs() {
     if (sel && $("#obs-produto")) sel.obs = $("#obs-produto").value;
+  }
+
+  /* ---------- 7.1 BLOCO "1 SABOR / 2 SABORES" ------------------------
+     Só aparece DEPOIS que existe um tamanho escolhido: antes disso não
+     dá para saber se aquele tamanho aceita meio a meio.
+     ------------------------------------------------------------------ */
+
+  function opcaoModo(id, nome, det, ativo, desativado) {
+    return '<div class="opcao opcao-modo' + (ativo ? " ativa" : "") + (desativado ? " desativada" : "") +
+      '" data-opcao="modo-sabores" data-id="' + id + '" role="radio"' +
+      ' aria-checked="' + (ativo ? "true" : "false") + '"' +
+      (desativado ? ' aria-disabled="true" tabindex="-1"' : ' tabindex="0"') + ">" +
+      '<span class="marcador"></span>' +
+      '<span class="opcao-texto"><span class="opcao-nome">' + esc(nome) + "</span>" +
+      '<span class="opcao-det">' + esc(det) + "</span></span></div>";
+  }
+
+  function blocoSabores() {
+    if (!sel.tamanho) return "";                        // tamanho primeiro, sempre
+    const tam = tamanhoDe(sel.p, sel.tamanho);
+    const candidatos = saboresCompativeis(sel.p, sel.tamanho);
+    const pode = !!metadeDe(tam) && candidatos.length > 0;
+    const meio = sel.modoSabores === "meio";
+
+    let h = '<div class="grupo"><div class="grupo-cabeca"><h4>Como você quer sua pizza?</h4></div>' +
+      '<div class="opcoes opcoes-modo">' +
+      opcaoModo("inteira", "1 sabor", "A pizza toda de um sabor só", !meio, false) +
+      opcaoModo("meio", "2 sabores — Meio a meio", "Metade de cada sabor", meio, !pode) +
+      "</div>" +
+      (pode ? "" : '<p class="nota-meio">Meio a meio indisponível para este tamanho.</p>') +
+      "</div>";
+
+    if (meio && pode) h += blocoSegundoSabor(tam, candidatos);
+    return h;
+  }
+
+  /* "Seus sabores": a 1ª metade já está definida — é a pizza que o
+     cliente abriu — e só a 2ª precisa ser escolhida. Os preços da lista
+     são os da METADE, não os do inteiro. */
+  function blocoSegundoSabor(tam, candidatos) {
+    const escolhido = sel.segundoSaborId;
+    return '<div class="grupo grupo-sabores"><div class="grupo-cabeca"><h4>Seus sabores</h4>' +
+      '<span class="etiqueta-obrig">Obrigatório</span></div>' +
+
+      '<div class="metade-fixa">' +
+      '<span class="metade-rotulo">1ª metade</span>' +
+      '<span class="metade-nome"><span class="tique" aria-hidden="true">✓</span> ' +
+      esc(semPrefixoPizza(sel.p.nome)) + "</span>" +
+      '<span class="opcao-preco">' + precoHTML(infoMetade(tam), "") + "</span>" +
+      "</div>" +
+
+      '<p class="metade-rotulo rotulo-segunda">2ª metade' +
+      (escolhido ? "" : ' <span class="pedido">— escolha um sabor</span>') + "</p>" +
+
+      '<div class="opcoes lista-sabores" role="radiogroup" aria-label="Sabor da segunda metade">' +
+      candidatos.map(function (s) {
+        const ativo = escolhido === s.id;
+        return '<div class="opcao' + (ativo ? " ativa" : "") + '" data-opcao="sabor2" data-id="' + esc(s.id) +
+          '" role="radio" aria-checked="' + (ativo ? "true" : "false") + '" tabindex="0">' +
+          '<span class="marcador"></span>' +
+          '<span class="opcao-texto"><span class="opcao-nome">' + esc(semPrefixoPizza(s.nome)) + "</span></span>" +
+          '<span class="opcao-preco">' + precoHTML(infoMetade(s.tamanho), "") + "</span></div>";
+      }).join("") +
+      "</div></div>";
+  }
+
+  /* Trocar de tamanho pode invalidar o que já estava escolhido: o novo
+     tamanho pode não aceitar meio a meio, ou o sabor 2 pode não existir
+     nele. Nada fica valendo em silêncio. */
+  function trocarTamanho(id) {
+    sel.tamanho = id;
+    if (sel.segundoSaborId &&
+      !saboresCompativeis(sel.p, sel.tamanho).some((s) => s.id === sel.segundoSaborId)) {
+      sel.segundoSaborId = null;
+    }
+    if (sel.modoSabores === "meio" && !podeMeioAMeio(sel.p, sel.tamanho)) {
+      sel.modoSabores = "inteira";
+      sel.segundoSaborId = null;
+    }
   }
 
   function renderProdutoFolha() {
@@ -1028,43 +1239,46 @@
     /* tamanhos — obrigatórios quando o produto tem sizes */
     if (op.tamanhos.length) {
       h += '<div class="grupo"><div class="grupo-cabeca"><h4>Escolha o tamanho</h4>' +
-           '<span class="etiqueta-obrig">Obrigatório</span></div><div class="opcoes">' +
-           op.tamanhos.map(function (t) {
-             return '<div class="opcao' + (sel.tamanho === t.id ? " ativa" : "") + '" data-opcao="tamanho" data-id="' + esc(t.id) +
-               '" role="radio" aria-checked="' + (sel.tamanho === t.id ? "true" : "false") + '" tabindex="0">' +
-               '<span class="marcador"></span>' +
-               '<span class="opcao-texto"><span class="opcao-nome">' + esc(t.nome) + "</span>" +
-               (t.detalhe ? '<span class="opcao-det">' + esc(t.detalhe) + "</span>" : "") + "</span>" +
-               '<span class="opcao-preco">' +
-                 precoHTML({ preco: t.preco, normal: t.precoNormal != null ? t.precoNormal : t.preco, promo: !!t.emPromocao }, "") +
-               "</span></div>";
-           }).join("") + "</div></div>";
+        '<span class="etiqueta-obrig">Obrigatório</span></div><div class="opcoes">' +
+        op.tamanhos.map(function (t) {
+          return '<div class="opcao' + (sel.tamanho === t.id ? " ativa" : "") + '" data-opcao="tamanho" data-id="' + esc(t.id) +
+            '" role="radio" aria-checked="' + (sel.tamanho === t.id ? "true" : "false") + '" tabindex="0">' +
+            '<span class="marcador"></span>' +
+            '<span class="opcao-texto"><span class="opcao-nome">' + esc(t.nome) + "</span>" +
+            (t.detalhe ? '<span class="opcao-det">' + esc(t.detalhe) + "</span>" : "") + "</span>" +
+            '<span class="opcao-preco">' +
+            precoHTML({ preco: t.preco, normal: t.precoNormal != null ? t.precoNormal : t.preco, promo: !!t.emPromocao }, "") +
+            "</span></div>";
+        }).join("") + "</div></div>";
+
+      /* 1 sabor / 2 sabores — logo abaixo do tamanho, porque depende dele */
+      h += blocoSabores();
     } else {
       const info = precoInicial(p);
       h += '<div class="grupo preco-unico"><span>Preço</span><span class="opcao-preco">' +
-           precoHTML(info, "") + "</span></div>";
+        precoHTML(info, "") + "</span></div>";
     }
 
     /* bordas — a seção some quando o produto não tem nenhuma */
     if (op.bordas.length) {
       h += '<div class="grupo"><div class="grupo-cabeca"><h4>Borda recheada</h4>' +
-           '<span class="dica">Opcional</span></div><div class="opcoes">' +
-           op.bordas.map(function (b) {
-             return opcaoHTML("borda", b.id, b.nome, "", b.preco, sel.borda === b.id, "Grátis");
-           }).join("") + "</div></div>";
+        '<span class="dica">Opcional</span></div><div class="opcoes">' +
+        op.bordas.map(function (b) {
+          return opcaoHTML("borda", b.id, b.nome, "", b.preco, sel.borda === b.id, "Grátis");
+        }).join("") + "</div></div>";
     }
 
     /* adicionais — idem */
     if (op.adicionais.length) {
       h += '<div class="grupo"><div class="grupo-cabeca"><h4>Adicionais</h4>' +
-           '<span class="dica">Escolha quantos quiser</span></div><div class="opcoes">' +
-           op.adicionais.map(function (a) {
-             return opcaoHTML("check", a.id, a.nome, "", a.preco, sel.adicionais.indexOf(a.id) >= 0, "");
-           }).join("") + "</div></div>";
+        '<span class="dica">Escolha quantos quiser</span></div><div class="opcoes">' +
+        op.adicionais.map(function (a) {
+          return opcaoHTML("check", a.id, a.nome, "", a.preco, sel.adicionais.indexOf(a.id) >= 0, "");
+        }).join("") + "</div></div>";
     }
 
     h += '<div class="grupo"><div class="grupo-cabeca"><h4>Alguma observação?</h4></div>' +
-         '<textarea class="campo-obs" id="obs-produto" placeholder="Ex.: sem cebola, bem assada..." maxlength="180">' + esc(sel.obs) + "</textarea></div>";
+      '<textarea class="campo-obs" id="obs-produto" placeholder="Ex.: sem cebola, bem assada..." maxlength="180">' + esc(sel.obs) + "</textarea></div>";
 
     $("#produto-corpo").innerHTML = h;
     prepararFotos($("#produto-corpo"));
@@ -1073,16 +1287,19 @@
 
   function renderRodapeProduto() {
     const pr = precoSelecionado();
-    const falta = temTamanhos(sel.p) && !sel.tamanho;
+    const faltaTamanho = temTamanhos(sel.p) && !sel.tamanho;
+    const faltaSabor = ehMeioAMeio() && !sel.segundoSaborId;
+    const falta = faltaTamanho || faltaSabor;
+    const rotulo = faltaTamanho ? "Escolha o tamanho" : "Escolha o segundo sabor";
     $("#produto-rodape").innerHTML =
       '<div class="contador-qtd">' +
-        '<button type="button" data-qtd="-1" aria-label="Diminuir"' + (sel.qtd <= 1 ? " disabled" : "") + ">−</button>" +
-        '<span class="n">' + sel.qtd + "</span>" +
-        '<button type="button" data-qtd="1" aria-label="Aumentar">+</button>' +
+      '<button type="button" data-qtd="-1" aria-label="Diminuir"' + (sel.qtd <= 1 ? " disabled" : "") + ">−</button>" +
+      '<span class="n">' + sel.qtd + "</span>" +
+      '<button type="button" data-qtd="1" aria-label="Aumentar">+</button>' +
       "</div>" +
       '<button type="button" class="btn btn-principal btn-add-produto" id="btn-adicionar"' + (falta ? " disabled" : "") + ">" +
-        (falta ? "<span>Escolha o tamanho</span>"
-               : '<span>Adicionar ao pedido</span><span class="dinheiro">' + money(pr.total) + "</span>") +
+      (falta ? "<span>" + rotulo + "</span>"
+        : '<span>Adicionar ao pedido</span><span class="dinheiro">' + money(pr.total) + "</span>") +
       "</button>";
   }
 
@@ -1091,14 +1308,40 @@
     if (temTamanhos(p) && !sel.tamanho) return;
     if (indisponivel(p) || bloqueado) return;
     const op = opcoesDo(p);
-    const pr = precoSelecionado();
     const t = op.tamanhos.find((x) => x.id === sel.tamanho);
     const b = op.bordas.find((x) => x.id === sel.borda);
     const obs = ($("#obs-produto") ? $("#obs-produto").value : "").trim();
 
-    adicionarItem({
+    /* Campos extras SÓ da pizza meio a meio. Uma pizza inteira e um
+       produto simples continuam gravando exatamente o que gravavam. */
+    let extra = {};
+    if (ehMeioAMeio()) {
+      const s2 = sel.segundoSaborId ? produtoPorId(sel.segundoSaborId) : null;
+      const m1 = metadeDe(t);
+      const m2 = s2 ? metadeDe(tamanhoDe(s2, sel.tamanho)) : null;
+      /* última conferência antes de gravar: sem os dois preços de
+         metade não existe pizza meio a meio para adicionar */
+      if (!s2 || indisponivel(s2) || !m1 || !m2) {
+        toast("Escolha o segundo sabor");
+        renderProdutoFolha();
+        return;
+      }
+      extra = {
+        meioAMeio: true,
+        segundoProdutoId: s2.id,
+        sabor1Nome: p.nome,
+        sabor2Nome: s2.nome,
+        /* só para a interface; quem manda nos totais é precoBase */
+        precoMetade1: m1.precoMetade,
+        precoMetade2: m2.precoMetade
+      };
+    }
+
+    const pr = precoSelecionado();
+
+    adicionarItem(Object.assign({
       produtoId: p.id,
-      nome: p.nome,
+      nome: extra.meioAMeio ? "Pizza Meio a Meio" : p.nome,
       categoria: p.categoria,
       tamanhoId: sel.tamanho,
       tamanhoNome: t ? t.nome : "",
@@ -1112,7 +1355,7 @@
       qtd: sel.qtd,
       precoBase: pr.base,
       precoExtras: pr.extras
-    });
+    }, extra));
 
     fecharFolha("#folha-produto");
     toast("Produto adicionado ao pedido");
@@ -1130,6 +1373,10 @@
   function detalhesItem(i) {
     let d = "";
     if (i.tamanhoNome) d += "<span>Tamanho: " + esc(i.tamanhoNome) + "</span>";
+    /* as duas metades entram logo depois do tamanho; item antigo, sem os
+       campos novos, nem passa por aqui */
+    const m = metadesDoItem(i);
+    if (m) d += "<span>½ " + esc(m.a) + "</span><span>½ " + esc(m.b) + "</span>";
     if (i.bordaNome) d += "<span>Borda: " + esc(i.bordaNome) + "</span>";
     if (i.adicionais && i.adicionais.length) {
       d += "<span>Adicionais: " + i.adicionais.map((a) => esc(a.nome)).join(", ") + "</span>";
@@ -1152,19 +1399,19 @@
       return '<div class="campo-mini ' + (c.largura === "meio" ? "meio" : "cheio") + '">' +
         '<label for="' + c.id + '">' + esc(c.rotulo) + (c.obrig ? " *" : "") + "</label>" +
         '<input class="campo-texto" id="' + c.id + '" type="text" data-endereco="' + c.chave + '"' +
-          (c.modo ? ' inputmode="' + c.modo + '"' : "") +
-          (c.auto ? ' autocomplete="' + c.auto + '"' : "") +
-          (c.chave === "cep" ? ' maxlength="9"' : ' maxlength="80"') +
-          ' placeholder="' + esc(c.placeholder) + '" value="' + esc(valor) + '">' +
-      "</div>";
+        (c.modo ? ' inputmode="' + c.modo + '"' : "") +
+        (c.auto ? ' autocomplete="' + c.auto + '"' : "") +
+        (c.chave === "cep" ? ' maxlength="9"' : ' maxlength="80"') +
+        ' placeholder="' + esc(c.placeholder) + '" value="' + esc(valor) + '">' +
+        "</div>";
     }).join("");
 
     return '<div class="secao-condicional' + (aberto ? " aberta" : "") + '" id="secao-endereco">' +
       '<div class="campo bloco-endereco">' +
-        "<label>Endereço de entrega</label>" +
-        '<div class="grade-endereco">' + campos + "</div>" +
-        '<p class="aviso-erro" id="erro-endereco" hidden>Preencha CEP, rua, número e bairro para a entrega.</p>' +
-        '<div id="nota-entrega">' + notaEntregaHTML() + "</div>" +
+      "<label>Endereço de entrega</label>" +
+      '<div class="grade-endereco">' + campos + "</div>" +
+      '<p class="aviso-erro" id="erro-endereco" hidden>Preencha CEP, rua, número e bairro para a entrega.</p>' +
+      '<div id="nota-entrega">' + notaEntregaHTML() + "</div>" +
       "</div></div>";
   }
 
@@ -1175,19 +1422,19 @@
     return '<div class="campo-mini cheio">' +
       '<label for="end-zona">Bairro *</label>' +
       '<select class="campo-texto" id="end-zona">' +
-        '<option value=""' + (escolhido ? "" : " selected") + ">Selecione seu bairro</option>" +
-        cfg.zones.map(function (z) {
-          return '<option value="' + esc(z.id) + '"' + (escolhido === z.id ? " selected" : "") + ">" +
-            esc(z.nome) + " — " + money(z.taxa) + "</option>";
-        }).join("") +
-        (cfg.allowUnlistedNeighborhoods
-          ? '<option value="' + OUTRO_BAIRRO + '"' + (outro ? " selected" : "") + ">Meu bairro não está na lista</option>"
-          : "") +
+      '<option value=""' + (escolhido ? "" : " selected") + ">Selecione seu bairro</option>" +
+      cfg.zones.map(function (z) {
+        return '<option value="' + esc(z.id) + '"' + (escolhido === z.id ? " selected" : "") + ">" +
+          esc(z.nome) + " — " + money(z.taxa) + "</option>";
+      }).join("") +
+      (cfg.allowUnlistedNeighborhoods
+        ? '<option value="' + OUTRO_BAIRRO + '"' + (outro ? " selected" : "") + ">Meu bairro não está na lista</option>"
+        : "") +
       "</select>" +
       '<div id="campo-bairro-livre" style="margin-top:8px"' + (outro ? "" : " hidden") + ">" +
-        '<label for="end-bairro-livre">Informe seu bairro</label>' +
-        '<input class="campo-texto" id="end-bairro-livre" type="text" maxlength="80" placeholder="Nome do bairro" value="' +
-          esc(outro ? (dados.endereco.bairro || "") : "") + '">' +
+      '<label for="end-bairro-livre">Informe seu bairro</label>' +
+      '<input class="campo-texto" id="end-bairro-livre" type="text" maxlength="80" placeholder="Nome do bairro" value="' +
+      esc(outro ? (dados.endereco.bairro || "") : "") + '">' +
       "</div></div>";
   }
 
@@ -1215,7 +1462,7 @@
     const t = totais();
     if (!ehDelivery()) {
       return '<div class="resumo-mini"><span>' + t.itens + (t.itens === 1 ? " item" : " itens") +
-             '</span><strong class="dinheiro">' + money(t.total) + "</strong></div>";
+        '</span><strong class="dinheiro">' + money(t.total) + "</strong></div>";
     }
     const e = entregaAtual();
     const conhecida = !e.taxaPendente;          // sabemos o valor da entrega?
@@ -1224,15 +1471,15 @@
     return '<div class="totais resumo-entrega">' +
       '<div class="linha-total"><span>Produtos</span><span class="dinheiro">' + money(t.total) + "</span></div>" +
       '<div class="linha-total"><span>Taxa de entrega</span><span class="' +
-        (e.gratis ? "taxa-gratis" : (conhecida ? "dinheiro" : "a-confirmar")) + '">' +
-        esc(e.gratis ? "GRÁTIS" : e.texto) + "</span></div>" +
+      (e.gratis ? "taxa-gratis" : (conhecida ? "dinheiro" : "a-confirmar")) + '">' +
+      esc(e.gratis ? "GRÁTIS" : e.texto) + "</span></div>" +
       '<div class="linha-total destaque"><span>' + (conhecida ? "Total" : "Total dos produtos") +
-        '</span><span class="dinheiro">' + money(total) + "</span></div>" +
+      '</span><span class="dinheiro">' + money(total) + "</span></div>" +
       (conhecida ? ""
         : '<p class="nota-taxa">A taxa de entrega não está incluída neste total — ela é confirmada pela pizzaria no WhatsApp.</p>') +
       (!e.permitido && e.motivoBloqueio
         ? '<p class="nota-taxa" style="color:var(--fechado)">' + esc(e.motivoBloqueio) + "</p>" : "") +
-    "</div>";
+      "</div>";
   }
 
   /* Marca a opção clicada sem redesenhar o formulário (preserva o que foi digitado). */
@@ -1282,29 +1529,29 @@
     if (etapa === "itens") {
       $("#carrinho-titulo").textContent = "Seu pedido";
       corpo.innerHTML = avisoHorarioHTML() + (avisosCarrinho.length
-          ? '<div class="aviso-carrinho">' + avisosCarrinho.map((a) => "<p>" + esc(a) + "</p>").join("") + "</div>"
-          : "") +
+        ? '<div class="aviso-carrinho">' + avisosCarrinho.map((a) => "<p>" + esc(a) + "</p>").join("") + "</div>"
+        : "") +
         carrinho.map(function (i) {
-        return '<div class="item-carrinho">' +
-          '<div><div class="item-nome">' + esc(i.nome) + "</div>" +
-          '<div class="item-detalhes">' + detalhesItem(i) + "</div></div>" +
-          '<div class="item-preco dinheiro">' + money(unitario(i) * i.qtd) + "</div>" +
-          '<div class="item-acoes">' +
+          return '<div class="item-carrinho">' +
+            '<div><div class="item-nome">' + esc(i.nome) + "</div>" +
+            '<div class="item-detalhes">' + detalhesItem(i) + "</div></div>" +
+            '<div class="item-preco dinheiro">' + money(unitario(i) * i.qtd) + "</div>" +
+            '<div class="item-acoes">' +
             '<button type="button" class="excluir" data-remover="' + i.uid + '">' +
-              '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h10M5.5 4V2.5h3V4M4 4l.6 8h4.8L10 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Excluir</button>' +
+            '<svg width="13" height="13" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 4h10M5.5 4V2.5h3V4M4 4l.6 8h4.8L10 4" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg> Excluir</button>' +
             '<div class="contador-qtd">' +
-              '<button type="button" data-menos="' + i.uid + '" aria-label="Diminuir quantidade">−</button>' +
-              '<span class="n">' + i.qtd + "</span>" +
-              '<button type="button" data-mais="' + i.uid + '" aria-label="Aumentar quantidade">+</button>' +
+            '<button type="button" data-menos="' + i.uid + '" aria-label="Diminuir quantidade">−</button>' +
+            '<span class="n">' + i.qtd + "</span>" +
+            '<button type="button" data-mais="' + i.uid + '" aria-label="Aumentar quantidade">+</button>' +
             "</div>" +
-          "</div></div>";
-      }).join("") +
-      '<div class="totais">' +
+            "</div></div>";
+        }).join("") +
+        '<div class="totais">' +
         '<div class="linha-total"><span>Subtotal</span><span class="dinheiro">' + money(t.subtotal) + "</span></div>" +
         '<div class="linha-total"><span>Bordas e adicionais</span><span class="dinheiro">' + money(t.extras) + "</span></div>" +
         '<div class="linha-total destaque"><span>Total</span><span class="dinheiro">' + money(t.total) + "</span></div>" +
-      "</div>" +
-      "";
+        "</div>" +
+        "";
 
       rodape.innerHTML = '<button type="button" class="btn btn-principal btn-bloco" id="ir-dados">Continuar pedido</button>';
       return;
@@ -1316,33 +1563,33 @@
       '<button type="button" class="voltar" id="voltar-itens">← Voltar aos itens</button>' +
       avisoHorarioHTML() +
       '<div class="campo"><label for="cli-nome">Seu nome *</label>' +
-        '<input class="campo-texto" id="cli-nome" type="text" autocomplete="name" placeholder="Como podemos te chamar?" value="' + esc(dados.nome) + '">' +
-        '<p class="aviso-erro" id="erro-nome" hidden>Precisamos do seu nome para identificar o pedido.</p></div>' +
+      '<input class="campo-texto" id="cli-nome" type="text" autocomplete="name" placeholder="Como podemos te chamar?" value="' + esc(dados.nome) + '">' +
+      '<p class="aviso-erro" id="erro-nome" hidden>Precisamos do seu nome para identificar o pedido.</p></div>' +
 
       '<div class="campo"><label>Como deseja receber?</label><div class="opcoes">' +
-        modosDisponiveis().map(function (r) {
-          return '<div class="opcao' + (dados.retirada === r.id ? " ativa" : "") + '" data-opcao="retirada" data-id="' + r.id +
-            '" role="radio" aria-checked="' + (dados.retirada === r.id ? "true" : "false") + '" tabindex="0">' +
-            '<span class="marcador"></span><span class="opcao-texto">' +
-            '<span class="opcao-nome">' + r.emoji + " " + esc(r.nome) + "</span>" +
-            '<span class="opcao-det">' + esc(r.detalhe) + "</span></span></div>";
-        }).join("") + "</div></div>" +
+      modosDisponiveis().map(function (r) {
+        return '<div class="opcao' + (dados.retirada === r.id ? " ativa" : "") + '" data-opcao="retirada" data-id="' + r.id +
+          '" role="radio" aria-checked="' + (dados.retirada === r.id ? "true" : "false") + '" tabindex="0">' +
+          '<span class="marcador"></span><span class="opcao-texto">' +
+          '<span class="opcao-nome">' + r.emoji + " " + esc(r.nome) + "</span>" +
+          '<span class="opcao-det">' + esc(r.detalhe) + "</span></span></div>";
+      }).join("") + "</div></div>" +
 
       enderecoHTML() +
 
       '<div class="campo"><label>Forma de pagamento</label><div class="opcoes">' +
-        CONFIG.pagamentos.map(function (pg) {
-          return '<div class="opcao' + (dados.pagamento === pg.id ? " ativa" : "") + '" data-opcao="pagamento" data-id="' + pg.id +
-            '" role="radio" aria-checked="' + (dados.pagamento === pg.id ? "true" : "false") + '" tabindex="0">' +
-            '<span class="marcador"></span><span class="opcao-texto">' +
-            '<span class="opcao-nome">' + pg.emoji + " " + esc(pg.nome) + "</span></span></div>";
-        }).join("") + "</div>" +
-        '<div id="campo-troco"' + (dados.pagamento === "dinheiro" ? "" : " hidden") + ' style="margin-top:10px">' +
-          '<input class="campo-texto" id="cli-troco" type="text" inputmode="decimal" placeholder="Troco para quanto? Ex.: R$ 100,00" value="' + esc(dados.troco) + '">' +
-        "</div></div>" +
+      CONFIG.pagamentos.map(function (pg) {
+        return '<div class="opcao' + (dados.pagamento === pg.id ? " ativa" : "") + '" data-opcao="pagamento" data-id="' + pg.id +
+          '" role="radio" aria-checked="' + (dados.pagamento === pg.id ? "true" : "false") + '" tabindex="0">' +
+          '<span class="marcador"></span><span class="opcao-texto">' +
+          '<span class="opcao-nome">' + pg.emoji + " " + esc(pg.nome) + "</span></span></div>";
+      }).join("") + "</div>" +
+      '<div id="campo-troco"' + (dados.pagamento === "dinheiro" ? "" : " hidden") + ' style="margin-top:10px">' +
+      '<input class="campo-texto" id="cli-troco" type="text" inputmode="decimal" placeholder="Troco para quanto? Ex.: R$ 100,00" value="' + esc(dados.troco) + '">' +
+      "</div></div>" +
 
       '<div class="campo"><label for="cli-obs">Observações gerais do pedido</label>' +
-        '<textarea class="campo-obs" id="cli-obs" placeholder="Ex.: chegamos às 20h, pode caprichar no orégano..." maxlength="240">' + esc(dados.obs) + "</textarea></div>" +
+      '<textarea class="campo-obs" id="cli-obs" placeholder="Ex.: chegamos às 20h, pode caprichar no orégano..." maxlength="240">' + esc(dados.obs) + "</textarea></div>" +
 
       '<div class="campo" id="resumo-checkout">' + resumoCheckoutHTML() + "</div>";
 
@@ -1367,12 +1614,12 @@
 
   /* campos de endereço: id do input, rótulo e se é obrigatório */
   const CAMPOS_ENDERECO = [
-    { chave: "cep",         id: "end-cep",         rotulo: "CEP",                 obrig: true,  placeholder: "00000-000", largura: "meio", modo: "numeric", auto: "postal-code" },
-    { chave: "rua",         id: "end-rua",         rotulo: "Rua / Avenida",       obrig: true,  placeholder: "Ex.: Rua das Palmeiras", largura: "cheio", auto: "address-line1" },
-    { chave: "numero",      id: "end-numero",      rotulo: "Número",              obrig: true,  placeholder: "123", largura: "meio" },
-    { chave: "complemento", id: "end-complemento", rotulo: "Complemento",         obrig: false, placeholder: "Apto, bloco (opcional)", largura: "meio" },
-    { chave: "bairro",      id: "end-bairro",      rotulo: "Bairro",              obrig: true,  placeholder: "Ex.: Centro", largura: "cheio", auto: "address-level3" },
-    { chave: "referencia",  id: "end-referencia",  rotulo: "Ponto de referência", obrig: false, placeholder: "Ex.: ao lado da padaria (opcional)", largura: "cheio" }
+    { chave: "cep", id: "end-cep", rotulo: "CEP", obrig: true, placeholder: "00000-000", largura: "meio", modo: "numeric", auto: "postal-code" },
+    { chave: "rua", id: "end-rua", rotulo: "Rua / Avenida", obrig: true, placeholder: "Ex.: Rua das Palmeiras", largura: "cheio", auto: "address-line1" },
+    { chave: "numero", id: "end-numero", rotulo: "Número", obrig: true, placeholder: "123", largura: "meio" },
+    { chave: "complemento", id: "end-complemento", rotulo: "Complemento", obrig: false, placeholder: "Apto, bloco (opcional)", largura: "meio" },
+    { chave: "bairro", id: "end-bairro", rotulo: "Bairro", obrig: true, placeholder: "Ex.: Centro", largura: "cheio", auto: "address-level3" },
+    { chave: "referencia", id: "end-referencia", rotulo: "Ponto de referência", obrig: false, placeholder: "Ex.: ao lado da padaria (opcional)", largura: "cheio" }
   ];
 
   const modoRecebimento = () =>
@@ -1525,6 +1772,8 @@
   function linhaItem(i) {
     const cat = i.categoria === "bebidas" ? "🥤 " : "";
     let l = cat + i.qtd + "x " + i.nome + (i.tamanhoNome ? " — " + i.tamanhoNome : "");
+    const m = metadesDoItem(i);
+    if (m) l += "\n½ " + m.a + "\n½ " + m.b;
     if (i.bordaNome) l += "\nBorda: " + i.bordaNome;
     if (i.adicionais && i.adicionais.length) {
       l += "\n" + i.adicionais.map((a) => "• " + a.nome).join("\n");
@@ -1663,7 +1912,7 @@
        ter fechado (ou o painel pode ter mudado a regra) enquanto o
        cliente montava o pedido. */
     if (typeof DATA_SOURCE !== "undefined" && DATA_SOURCE === "supabase" &&
-        window.Cardapio && window.Cardapio.recarregarHorarios) {
+      window.Cardapio && window.Cardapio.recarregarHorarios) {
       const estavaAberto = statusLoja().aberto;
       try {
         HORARIOS = await window.Cardapio.recarregarHorarios();
@@ -1703,7 +1952,7 @@
       }
       const depois = entregaAtual();
       const mudou = depois.taxa !== antes.taxa || depois.taxaPendente !== antes.taxaPendente ||
-                    depois.gratis !== antes.gratis;
+        depois.gratis !== antes.gratis;
       if (!depois.permitido) {
         atualizarResumoCheckout();
         const aviso = $("#erro-endereco");
@@ -1717,6 +1966,42 @@
         return;
       }
     }
+    /* CARDÁPIO — relido do banco antes da conferência final.
+
+       Sem isto, revalidarCarrinhoSalvo() compararia o carrinho com o
+       MENU que está na memória desde que a página abriu: preço, preço
+       da metade, promoção, disponibilidade e tamanhos poderiam ter
+       mudado no painel e o pedido sairia com os valores antigos.
+
+       É FAIL-CLOSED de propósito. Se a releitura não vier, não
+       finalizamos com o cardápio velho e não caímos para o local: o
+       envio para e o carrinho fica exatamente como estava, para o
+       cliente tentar de novo em seguida. */
+    if (typeof DATA_SOURCE !== "undefined" && DATA_SOURCE === "supabase" &&
+      window.Cardapio && window.Cardapio.recarregarMenu) {
+      try {
+        const atual = await window.Cardapio.recarregarMenu();
+        if (!atual || !Array.isArray(atual.MENU) || !atual.MENU.length) {
+          throw new Error("O cardápio voltou vazio na conferência final.");
+        }
+        /* mesma montagem do carregamento — "Mais pedidas" continua
+           saindo de comMaisPedidas(), não de uma lista paralela */
+        const antes = impressaoDoMenu(MENU);
+        CATEGORIAS = comMaisPedidas(atual.CATEGORIAS, atual.MENU);
+        MENU = atual.MENU;
+        /* Redesenhar o cardápio só quando ele realmente mudou. No caso
+           comum — nada mudou — não faz sentido recriar a lista inteira
+           e o observador de seções com a folha do carrinho aberta. */
+        if (impressaoDoMenu(MENU) !== antes) {
+          renderRail(); renderCardapio(); observarSecoes();
+        }
+      } catch (e) {
+        console.error("[cardápio] não foi possível reconferir os preços:", (e && e.message) || e);
+        toast("Não foi possível confirmar os preços do pedido. Tente novamente.", "erro");
+        return;                                 // carrinho intacto, nada enviado
+      }
+    }
+
     /* Última conferência: o pedido nunca sai com preço antigo do localStorage. */
     const conferencia = revalidarCarrinhoSalvo(true);
     if (!conferencia.ok) {
@@ -1734,7 +2019,7 @@
        carregamento (nunca com número escrito no código); se não houver
        número válido nenhum, o pedido não sai e o carrinho fica intacto. */
     if (typeof DATA_SOURCE !== "undefined" && DATA_SOURCE === "supabase" &&
-        window.Cardapio && window.Cardapio.recarregarEmpresa) {
+      window.Cardapio && window.Cardapio.recarregarEmpresa) {
       try {
         const atual = await window.Cardapio.recarregarEmpresa();
         if (atual) { EMPRESA = atual; aplicarEmpresa(atual); }
@@ -1779,14 +2064,16 @@
     if (!alvo) return;
     const uid = "hero";
     let h = '<svg viewBox="0 0 200 200" aria-hidden="true" preserveAspectRatio="xMidYMid slice">' +
-      pizzaSVG({ massa: "#E9BB6A", base: "#D2431F", itens: [
-        { forma: "circulo", cor: "#8E2B1F", borda: "#6C1D14", n: 10, tam: 15 },
-        { forma: "gota",    cor: "#FAEFCF", n: 8,  tam: 16 },
-        { forma: "folha",   cor: "#3F7A38", n: 7,  tam: 12 }
-      ] }, 1313, uid) + "</svg>";
+      pizzaSVG({
+        massa: "#E9BB6A", base: "#D2431F", itens: [
+          { forma: "circulo", cor: "#8E2B1F", borda: "#6C1D14", n: 10, tam: 15 },
+          { forma: "gota", cor: "#FAEFCF", n: 8, tam: 16 },
+          { forma: "folha", cor: "#3F7A38", n: 7, tam: 12 }
+        ]
+      }, 1313, uid) + "</svg>";
     if (CONFIG.heroImagem) {
       h += '<img class="foto-real" src="' + esc(CONFIG.heroImagem) +
-           '" alt="Pizza recém-saída do forno" decoding="async">';
+        '" alt="Pizza recém-saída do forno" decoding="async">';
     }
     alvo.innerHTML = h;
     prepararFotos(alvo);
@@ -1847,8 +2134,18 @@
       /* opções dentro da folha de produto / dados */
       const op = ev.target.closest(".opcao");
       if (op) {
+        /* opção desativada (ex.: meio a meio sem sabor compatível) não
+           responde a clique nem a Enter/espaço */
+        if (op.classList.contains("desativada")) return;
         const tipo = op.dataset.opcao, id = op.dataset.id;
-        if (tipo === "tamanho") { guardarObs(); sel.tamanho = id; renderProdutoFolha(); }
+        if (tipo === "tamanho") { guardarObs(); trocarTamanho(id); renderProdutoFolha(); }
+        else if (tipo === "modo-sabores") {
+          guardarObs();
+          sel.modoSabores = id === "meio" ? "meio" : "inteira";
+          if (sel.modoSabores === "inteira") sel.segundoSaborId = null;
+          renderProdutoFolha();
+        }
+        else if (tipo === "sabor2") { guardarObs(); sel.segundoSaborId = id; renderProdutoFolha(); }
         else if (tipo === "borda") { guardarObs(); sel.borda = id; renderProdutoFolha(); }
         else if (tipo === "check") {
           guardarObs();
