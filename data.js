@@ -454,6 +454,8 @@ window.Cardapio = (function () {
       faviconPath: faviconPath,
       logoUrl: urlDoBucket(logoPath, versao),
       faviconUrl: urlDoBucket(faviconPath, versao),
+      /* avaliações do Google — o que a empresa cadastrou no painel */
+      googleReviews: mapearAvaliacoes(linha),
       endereco: {
         rua: texto(linha, "address_street"),
         numero: texto(linha, "address_number"),
@@ -464,6 +466,47 @@ window.Cardapio = (function () {
         cep: texto(linha, "address_postal_code")
       }
     };
+  }
+
+  /* -------------------------------------------------------------------
+     AVALIAÇÕES DO GOOGLE
+
+     Quatro colunas de `businesses`, e nenhuma outra fonte: cada empresa
+     cadastra as suas no painel. Aqui não existe número de exemplo, não
+     existe valor de outra casa e não existe padrão — o que não for um
+     número válido vira null, e null significa "não mostrar".
+
+     A conversão é defensiva de propósito: a linha pode vir de um banco
+     onde alguém editou o valor à mão. Nota fora de 0–5, quantidade
+     negativa ou endereço que não é http(s) são simplesmente descartados,
+     em vez de irem parar na tela.
+     ------------------------------------------------------------------- */
+  function mapearAvaliacoes(linha) {
+    const l = linha || {};
+
+    const nota = numeroSolto(l.google_rating);
+    const notaOk = (typeof nota === "number" && isFinite(nota) && nota >= 0 && nota <= 5) ? nota : null;
+
+    const qtd = numeroSolto(l.google_reviews_count);
+    const qtdOk = (typeof qtd === "number" && isFinite(qtd) && qtd >= 0) ? Math.trunc(qtd) : null;
+
+    return {
+      show: l.show_google_reviews === true,
+      rating: notaOk,
+      count: qtdOk,
+      url: urlPublica(l.google_reviews_url)
+    };
+  }
+
+  /* Só http(s). Qualquer outro esquema — javascript:, data:, mailto: —
+     é descartado: este valor vira um href na página pública. */
+  function urlPublica(valor) {
+    const bruto = String(valor == null ? "" : valor).trim();
+    if (!bruto) return "";
+    try {
+      const u = new URL(bruto);
+      return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
+    } catch (e) { return ""; }
   }
 
   /* URL pública de um objeto do bucket da identidade visual. Quem monta a

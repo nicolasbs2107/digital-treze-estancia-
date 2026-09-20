@@ -1273,6 +1273,35 @@ body.sem-estabelecimento {
   margin-top: 4px;
 }
 
+/* Link opcional para a página do Google. Discreto sobre o cartão vinho,
+   e some por completo quando a empresa não cadastrou endereço. */
+.link-google {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #E8B45C;
+  text-decoration: none;
+  border-bottom: 1px solid rgba(232, 180, 92, .45);
+  padding-bottom: 1px;
+  transition: color .16s ease, border-color .16s ease;
+}
+
+.link-google:focus-visible {
+  outline: 2px solid #E8B45C;
+  outline-offset: 3px;
+}
+
+@media (hover:hover) {
+  .link-google:hover {
+    color: #FFF6EA;
+    border-color: #FFF6EA;
+  }
+}
+
+
 /* ---------- 8. RODAPÉ ------------------------------------------------ */
 .rodape {
   background: var(--vinho-fundo);

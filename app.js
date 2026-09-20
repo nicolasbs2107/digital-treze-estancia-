@@ -510,6 +510,120 @@
      Cada pedaço some por completo quando o campo está vazio — nunca fica
      rótulo solto, buraco no layout ou aviso de "não cadastrado".
      ------------------------------------------------------------------- */
+  /* -------------------------------------------------------------------
+     AVALIAÇÕES DO GOOGLE — função única
+
+     Nenhuma nota e nenhuma quantidade existem escritas no HTML ou aqui.
+     Em produção a fonte é EXCLUSIVAMENTE businesses, pelo objeto
+     googleReviews que o data.js monta; os valores de menu-data.js só
+     entram quando o site está mesmo rodando no fallback local de
+     desenvolvimento.
+
+     Três lugares mostram avaliação — a linha do topo, o card "Avaliação"
+     da seção Sobre e a seção "Quem conhece, recomenda" — e os três são
+     ligados ou desligados por esta função, juntos. Desligado significa
+     sumir inteiro: sem estrela solta, sem travessão e sem cartão vazio.
+     ------------------------------------------------------------------- */
+
+  /* O que deve ser exibido, ou null quando não há nada a exibir. */
+  function avaliacoesAtuais() {
+    let nota = null, quantidade = null, url = "";
+
+    if (typeof DATA_SOURCE !== "undefined" && DATA_SOURCE === "supabase") {
+      const g = (EMPRESA && EMPRESA.googleReviews) || null;
+      if (!g || g.show !== true) return null;       // a empresa não quer exibir
+      nota = g.rating;
+      quantidade = g.count;
+      url = g.url || "";
+    } else {
+      /* fallback local: os valores de desenvolvimento de menu-data.js */
+      nota = Number(CONFIG.avaliacao);
+      const q = Number(CONFIG.totalAvaliacoes);
+      quantidade = (isFinite(q) && q >= 0) ? Math.trunc(q) : null;
+    }
+
+    /* Sem nota válida não há o que mostrar — nem a quantidade sozinha. */
+    if (typeof nota !== "number" || !isFinite(nota) || nota < 0 || nota > 5) return null;
+    return { nota: nota, quantidade: quantidade, url: url };
+  }
+
+  const notaTexto = (n) => n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
+  /* "1 avaliação" / "327 avaliações". Quantidade ausente ou zero não
+     rende texto nenhum: "0 avaliações" ao lado de uma nota só confunde. */
+  function contagemTexto(q) {
+    if (typeof q !== "number" || !isFinite(q) || q < 1) return "";
+    return q.toLocaleString("pt-BR") + (q === 1 ? " avaliação" : " avaliações");
+  }
+
+  /* Estrelas cheias arredondadas para a nota mais próxima — o número
+     exato fica escrito ao lado, que é onde a precisão importa. */
+  function estrelasTexto(n) {
+    const cheias = Math.max(0, Math.min(5, Math.round(n)));
+    return "★".repeat(cheias) + "☆".repeat(5 - cheias);
+  }
+
+  function renderAvaliacoes() {
+    const a = avaliacoesAtuais();
+    const topo = $("#info-avaliacao");
+    const bloco = $("#bloco-avaliacao");
+    const secao = $("#secao-avaliacoes");
+    const link = $("#link-google");
+
+    if (!a) {
+      if (topo) topo.hidden = true;
+      if (bloco) bloco.hidden = true;
+      if (secao) secao.hidden = true;
+      if (link) { link.hidden = true; link.removeAttribute("href"); }
+      /* limpa o que já estava escrito: se a empresa desligar a opção e a
+         página recarregar os dados, não pode sobrar nota de antes */
+      $$(".conta-avaliacoes").forEach((el) => (el.textContent = ""));
+      $$(".nota-estrelas").forEach((el) => (el.textContent = ""));
+      ["#nota-topo", "#nota-valor", "#nota-grande"].forEach(function (sel) {
+        const el = $(sel); if (el) el.textContent = "";
+      });
+      return;
+    }
+
+    const nota = notaTexto(a.nota);
+    const contagem = contagemTexto(a.quantidade);
+    const estrelas = estrelasTexto(a.nota);
+
+    ["#nota-topo", "#nota-valor", "#nota-grande"].forEach(function (sel) {
+      const el = $(sel); if (el) el.textContent = nota;
+    });
+    /* Sem contagem, os elementos que só existem para mostrá-la somem —
+       inclusive a chamada "… no Google", que sozinha ficaria pela metade. */
+    $$(".conta-avaliacoes").forEach(function (el) {
+      el.textContent = contagem;
+      el.hidden = !contagem;
+      const chamada = el.closest(".nota-chamada");
+      if (chamada) chamada.hidden = !contagem;
+    });
+    $$(".nota-estrelas").forEach(function (el) {
+      el.textContent = estrelas;
+      el.setAttribute("aria-hidden", "true");
+    });
+
+    /* o travessão do topo só existe quando há contagem para separar */
+    const separador = $("#separa-avaliacoes");
+    if (separador) separador.hidden = !contagem;
+
+    if (topo) topo.hidden = false;
+    if (bloco) bloco.hidden = false;
+    if (secao) {
+      secao.hidden = false;
+      secao.setAttribute("aria-label",
+        "Avaliação " + nota + " de 5 no Google" + (contagem ? ", " + contagem : ""));
+    }
+
+    /* Link opcional. Sem URL o cartão continua igual, só não é clicável. */
+    if (link) {
+      if (a.url) { link.hidden = false; link.href = a.url; }
+      else { link.hidden = true; link.removeAttribute("href"); }
+    }
+  }
+
   function renderPerfilEmpresa(e) {
     e = e || EMPRESA || {};
 
@@ -2097,11 +2211,7 @@
       el.href = "https://wa.me/" + numero + "?text=" +
         encodeURIComponent("Olá! Vim pelo cardápio digital da " + nomeEmpresa() + ".");
     });
-    $("#nota-valor").textContent = CONFIG.avaliacao.toLocaleString("pt-BR", { minimumFractionDigits: 1 });
-    $$(".conta-avaliacoes").forEach(function (el) {
-      el.textContent = CONFIG.totalAvaliacoes.toLocaleString("pt-BR") + " avaliações";
-    });
-    $("#nota-topo").textContent = CONFIG.avaliacao.toLocaleString("pt-BR", { minimumFractionDigits: 1 });
+    renderAvaliacoes();
     $("#ano").textContent = new Date().getFullYear();
     if (!CONFIG.demo) $$(".so-demo").forEach((el) => (el.hidden = true));
     renderServicos();

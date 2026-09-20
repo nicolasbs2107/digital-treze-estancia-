@@ -1915,6 +1915,75 @@
     return { ok: true, valor: d.slice(0, 5) + "-" + d.slice(5), motivo: "" };
   }
 
+  /* ---- avaliações do Google ------------------------------------------
+     Os três campos são opcionais: em branco grava null e pronto. Desligar
+     a exibição NÃO apaga nada — a nota fica guardada, só não aparece no
+     cardápio, para a casa poder religar depois sem redigitar.
+     ------------------------------------------------------------------ */
+
+  /* 0 a 5, uma casa decimal (a coluna é numeric(2,1)). Aceita vírgula. */
+  function normalizarNota(valor) {
+    const s = String(valor == null ? "" : valor).trim();
+    if (!s) return { ok: true, valor: null, motivo: "" };
+    const n = Number(s.replace(",", "."));
+    if (isNaN(n) || !isFinite(n)) {
+      return { ok: false, valor: null, motivo: "A nota precisa ser um número. Exemplo: 4,8." };
+    }
+    if (n < 0 || n > 5) {
+      return { ok: false, valor: null, motivo: "A nota do Google vai de 0 a 5." };
+    }
+    const arredondada = Math.round(n * 10) / 10;
+    return { ok: true, valor: arredondada, motivo: "" };
+  }
+
+  /* Inteiro, mínimo 0. */
+  function normalizarQtdAvaliacoes(valor) {
+    const s = String(valor == null ? "" : valor).trim();
+    if (!s) return { ok: true, valor: null, motivo: "" };
+    if (!/^\d+$/.test(s.replace(/[.\s]/g, ""))) {
+      return { ok: false, valor: null, motivo: "A quantidade precisa ser um número inteiro, sem vírgula." };
+    }
+    const n = Number(s.replace(/[.\s]/g, ""));
+    if (isNaN(n) || n < 0) {
+      return { ok: false, valor: null, motivo: "A quantidade não pode ser negativa." };
+    }
+    return { ok: true, valor: Math.trunc(n), motivo: "" };
+  }
+
+  /* Só http(s): este endereço vira um link na página pública, então um
+     javascript: ou data: aqui seria um problema, não um endereço. */
+  function normalizarUrlAvaliacoes(valor) {
+    const s = String(valor == null ? "" : valor).trim();
+    if (!s) return { ok: true, valor: null, motivo: "" };
+    let u;
+    try { u = new URL(s); }
+    catch (e) {
+      return { ok: false, valor: null, motivo: "Endereço inválido. Cole o link completo, começando com https://" };
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") {
+      return { ok: false, valor: null, motivo: "O link precisa começar com http:// ou https://" };
+    }
+    return { ok: true, valor: u.href, motivo: "" };
+  }
+
+  /* 4.8 vem do banco como "4.8"; no campo a casa vê "4,8". */
+  const notaParaCampo = (v) => String(v == null ? "" : v).replace(".", ",");
+
+  const textoNota = (r, bruto) =>
+    !String(bruto || "").trim() ? "Em branco: o cardápio não mostra nota nenhuma."
+      : r.ok ? "Será gravada como " + String(r.valor).replace(".", ",") + "."
+        : r.motivo;
+
+  const textoQtd = (r, bruto) =>
+    !String(bruto || "").trim() ? "Em branco: o cardápio mostra só a nota."
+      : r.ok ? "Será gravada como " + r.valor + "."
+        : r.motivo;
+
+  const textoUrlAval = (r, bruto) =>
+    !String(bruto || "").trim() ? "Em branco: o cartão aparece sem link."
+      : r.ok ? "O cardápio abre este endereço em uma nova aba."
+        : r.motivo;
+
   const UFS = ["AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA", "PB",
     "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO"];
 
@@ -1929,7 +1998,15 @@
     { id: "cfg-compl", col: "address_complement", trata: textoOuNulo },
     { id: "cfg-cidade", col: "address_city", trata: textoOuNulo },
     { id: "cfg-uf", col: "address_state", trata: textoOuNulo },
-    { id: "cfg-cep", col: "address_postal_code", norm: normalizarCep }
+    { id: "cfg-cep", col: "address_postal_code", norm: normalizarCep },
+    /* Avaliações do Google. grupo: "google" só existe para que
+       temPerfil() continue falando apenas das colunas de PERFIL — o
+       aviso de "rode o business-profile-schema.sql" não pode sumir só
+       porque as colunas de avaliação existem. */
+    { id: "cfg-google-on", col: "show_google_reviews", grupo: "google", marcar: true },
+    { id: "cfg-google-nota", col: "google_rating", grupo: "google", norm: normalizarNota },
+    { id: "cfg-google-qtd", col: "google_reviews_count", grupo: "google", norm: normalizarQtdAvaliacoes },
+    { id: "cfg-google-url", col: "google_reviews_url", grupo: "google", norm: normalizarUrlAvaliacoes }
   ];
 
   /* ---- identidade visual: logo e favicon -----------------------------
@@ -2121,7 +2198,11 @@
   const temColuna = (col) => !!estado.empresa && (col in estado.empresa);
   const valorAtual = (col) => (temColuna(col) && estado.empresa[col] != null)
     ? String(estado.empresa[col]) : "";
-  const temPerfil = () => CAMPOS_PERFIL.some((c) => temColuna(c.col));
+  /* Só as colunas de PERFIL: o aviso sobre o business-profile-schema.sql
+     não pode sumir porque as colunas de avaliação, que vieram em outra
+     migração, existem. */
+  const temPerfil = () => CAMPOS_PERFIL.some((c) => c.grupo !== "google" && temColuna(c.col));
+  const temAvaliacoes = () => temColuna("show_google_reviews");
 
   /* ---- tela ---------------------------------------------------------- */
   function renderConfig() {
@@ -2224,6 +2305,41 @@
         "</div>"
         : "") +
 
+      /* ---------- bloco 5: avaliações do Google ---------- */
+      (temAvaliacoes()
+        ? '<div class="painel-caixa"><h3>Avaliações do Google</h3>' +
+        /* rótulo ENVOLVE o campo (associação implícita) e não usa
+           for= ao mesmo tempo: um clique é um clique. */
+        '<label class="interruptor-linha">' +
+        '<span class="texto">Exibir avaliações no cardápio' +
+        "<small>Quando desligado, o cardápio não mostra nota, quantidade nem link.</small></span>" +
+        '<input type="checkbox" id="cfg-google-on" class="caixa-interruptor"' +
+        (estado.empresa.show_google_reviews === true ? " checked" : "") + "></label>" +
+
+        '<div class="duas" style="margin-top:12px">' +
+        '<div class="campo"><label for="cfg-google-nota">Nota no Google <span class="opcional">opcional</span></label>' +
+        /* 4 caracteres: cabe "4,85" colado da página do Google, que a
+           normalização arredonda para 4,9 e a dica confirma na hora. */
+        '<input id="cfg-google-nota" inputmode="decimal" placeholder="4,8" maxlength="4" value="' +
+        esc(notaParaCampo(valorAtual("google_rating"))) + '">' +
+        '<p class="dica" id="dica-google-nota">De 0 a 5, com uma casa decimal.</p></div>' +
+
+        '<div class="campo"><label for="cfg-google-qtd">Quantidade de avaliações <span class="opcional">opcional</span></label>' +
+        '<input id="cfg-google-qtd" inputmode="numeric" placeholder="175" maxlength="9" value="' +
+        esc(valorAtual("google_reviews_count")) + '">' +
+        '<p class="dica" id="dica-google-qtd">Número inteiro, como aparece no Google.</p></div>' +
+        "</div>" +
+
+        '<div class="campo"><label for="cfg-google-url">Link da página no Google <span class="opcional">opcional</span></label>' +
+        '<input id="cfg-google-url" type="url" autocapitalize="none" autocorrect="off" spellcheck="false" ' +
+        'placeholder="https://..." value="' + esc(valorAtual("google_reviews_url")) + '">' +
+        '<p class="dica" id="dica-google-url">Com link, o cardápio mostra "Ver avaliações no Google".</p></div>' +
+
+        '<p class="aviso-info">Desligar a exibição não apaga nada: a nota continua guardada aqui e volta a aparecer ' +
+        "quando você religar a opção.</p>" +
+        "</div>"
+        : "") +
+
       (temPerfil() ? ""
         : '<p class="aviso-info">A tabela <b>businesses</b> ainda não tem as colunas de perfil. ' +
         "Rode o <code>business-profile-schema.sql</code> no Supabase para liberar estes campos.</p>") +
@@ -2273,6 +2389,18 @@
         const conta = $("#conta-desc");
         conta.textContent = el.value.length + " / " + LIMITE_DESC;
         conta.classList.toggle("no-limite", el.value.length >= LIMITE_DESC);
+      } else if (el.id === "cfg-google-nota") {
+        const r = normalizarNota(el.value);
+        $("#dica-google-nota").textContent = textoNota(r, el.value);
+        el.classList.toggle("invalido", !!el.value.trim() && !r.ok);
+      } else if (el.id === "cfg-google-qtd") {
+        const r = normalizarQtdAvaliacoes(el.value);
+        $("#dica-google-qtd").textContent = textoQtd(r, el.value);
+        el.classList.toggle("invalido", !!el.value.trim() && !r.ok);
+      } else if (el.id === "cfg-google-url") {
+        const r = normalizarUrlAvaliacoes(el.value);
+        $("#dica-google-url").textContent = textoUrlAval(r, el.value);
+        el.classList.toggle("invalido", !!el.value.trim() && !r.ok);
       } else if (el.id === "cfg-cep") {
         /* máscara enquanto digita, sem atrapalhar quem apaga */
         const d = el.value.replace(/\D/g, "").slice(0, 8);
@@ -2344,7 +2472,9 @@
       const c = CAMPOS_PERFIL[i];
       const el = $("#" + c.id);
       if (!el || !temColuna(c.col)) continue;
-      if (c.norm) {
+      if (c.marcar) {                       // interruptor: grava booleano
+        dados[c.col] = !!el.checked;
+      } else if (c.norm) {
         const r = c.norm(el.value);
         if (!r.ok) return mostrar(r.motivo, el);
         dados[c.col] = r.valor;
