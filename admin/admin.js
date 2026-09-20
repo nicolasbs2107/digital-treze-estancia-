@@ -218,9 +218,37 @@
 
   function mensagemErro(e) {
     const m = (e && (e.message || e.error_description)) || "";
-    if (/row-level security|violates|permission/i.test(m)) return "Você não tem permissão para esta alteração.";
+    if (/row-level security|violates|permission/i.test(m)) {
+      /* Uma escrita recusada pela RLS pode ser exatamente isto: a empresa
+         foi suspensa com esta aba aberta. Vale uma conferência — sem
+         await, porque quem chamou precisa de uma mensagem agora; se a
+         suspensão se confirmar, a tela troca sozinha em seguida.
+         Não é polling: só acontece depois de uma recusa de verdade. */
+      conferirSuspensao();
+      return "Você não tem permissão para esta alteração.";
+    }
     if (/Failed to fetch|NetworkError/i.test(m)) return "Sem conexão com o servidor. Tente de novo.";
     return m || "Não foi possível concluir. Tente novamente.";
+  }
+
+  /* Relê a linha da empresa e, se ela estiver suspensa, leva para a tela
+     de suspensão. Falha de leitura não muda nada: preferimos deixar a
+     mensagem que já estava na tela a inventar um diagnóstico. */
+  let conferindo = false;
+  async function conferirSuspensao() {
+    if (conferindo || !estado.empresa || !estado.empresa.id) return false;
+    conferindo = true;
+    try {
+      const r = await sb.from("businesses").select("*").eq("id", estado.empresa.id).maybeSingle();
+      if (r.error || !r.data) return false;
+      estado.empresa = r.data;
+      if (empresaSuspensa(r.data)) { telaSuspensa(); return true; }
+      return false;
+    } catch (e) {
+      return false;
+    } finally {
+      conferindo = false;
+    }
   }
 
   let aoFechar = null;
@@ -275,7 +303,30 @@
     $("#tela-carregando").hidden = qual !== "carregando";
     $("#tela-login").hidden = qual !== "login";
     $("#tela-senha").hidden = qual !== "senha";
+    $("#tela-suspensa").hidden = qual !== "suspensa";
     $("#tela-painel").hidden = qual !== "painel";
+  }
+
+  /* ---------- 3.1 EMPRESA SUSPENSA -----------------------------------
+     Suspensão é assunto comercial, não erro técnico. O cliente vê uma
+     explicação em português e um botão de sair — nunca "permission
+     denied", "RLS" ou código de erro do Postgres.
+
+     O motivo da suspensão NÃO é mostrado aqui: ele é anotação interna do
+     Super Admin (pode dizer "pagamento em atraso", e isso não é para
+     aparecer na tela de quem abriu o painel).
+     ------------------------------------------------------------------ */
+  const empresaSuspensa = (e) => !!e && e.status === "suspended";
+
+  function telaSuspensa() {
+    /* nada de produto, categoria, entrega, horário ou domínio fica na
+       memória de uma sessão que não pode operar */
+    estado.produtos = []; estado.categorias = [];
+    estado.entrega = null; estado.zonas = []; estado.entregaCarregada = false;
+    estado.horarios = []; estado.horariosCfg = null;
+    estado.horariosCarregados = false; estado.horariosSujo = false;
+    estado.dominios = []; estado.dominiosCarregados = false;
+    mostrarTela("suspensa");
   }
 
   /* Tira da barra de endereços tudo que o fluxo de e-mail deixou para
@@ -508,6 +559,16 @@
         return;
       }
       estado.empresa = empresa;
+
+      /* SUSPENSÃO — conferida ANTES de carregar qualquer coisa.
+         O banco já bloqueia as escritas (is_business_member só autoriza
+         empresa ativa); isto é a porta da frente, para a pessoa entender
+         o que houve em vez de esbarrar num erro a cada clique. */
+      if (empresaSuspensa(empresa)) {
+        telaSuspensa();
+        return;
+      }
+
       $("#topo-empresa").textContent = empresa[estado.campoNome] || "Painel";
       $("#topo-email").textContent = estado.usuario.email || "";
       await carregarDados();
@@ -2535,6 +2596,10 @@
       } else {
         await desfazerEnviados(enviados);
         mostrar("Não foi possível salvar as configurações. Tente novamente.");
+        /* Esta tela tem mensagem própria e não passa por mensagemErro(),
+           então a conferência de suspensão precisa ser chamada aqui
+           também: a recusa pode ser exatamente a empresa suspensa. */
+        conferirSuspensao();
       }
     } finally {
       estado.salvando = false;
@@ -2949,6 +3014,7 @@
       this.setAttribute("aria-label", mostrando ? "Mostrar senha" : "Ocultar senha");
     });
     $("#btn-sair").addEventListener("click", sair);
+    $("#btn-sair-suspensa").addEventListener("click", sair);
 
     /* primeiro acesso: mesmo comportamento do "Mostrar" do login */
     $("#form-senha").addEventListener("submit", criarSenha);

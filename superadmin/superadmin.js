@@ -7,11 +7,13 @@
 
    Quem autoriza de verdade é o banco:
      • is_platform_admin()          — diz se esta conta é super admin
-     • superadmin_list_businesses() — lista as empresas
-     • superadmin_create_business() — cria a empresa (tudo numa transação)
-     • provision-business-admin     — Edge Function que convida o dono
+     • superadmin_list_businesses_v2() — lista as empresas, com status
+     • superadmin_create_business()    — cria a empresa (numa transação)
+     • superadmin_set_business_status()— suspende e reativa
+     • superadmin_delete_business()    — exclui, conferindo o nome
+     • provision-business-admin        — Edge Function que convida o dono
 
-   As três RPCs recusam sozinhas quem não é super admin, com errcode
+   Todas as RPCs recusam sozinhas quem não é super admin, com errcode
    42501. A Edge Function responde 403. Esconder botão é conforto de
    interface, não segurança: a segurança está do lado de lá.
 
@@ -332,12 +334,23 @@
             atualizadaEm: texto(l.updated_at),
             produtos: inteiro(l.products_count),
             membros: inteiro(l.members_count),
-            dominio: texto(l.primary_domain)
+            dominio: texto(l.primary_domain),
+            /* Só dois estados existem hoje. Qualquer coisa diferente de
+               "suspended" conta como ativa — um valor novo no banco não pode
+               fazer a listagem sumir nem travar uma empresa que funciona. */
+            status: l.status === "suspended" ? "suspended" : "active",
+            suspensaEm: texto(l.suspended_at),
+            motivoSuspensao: texto(l.suspension_reason)
         };
     }
 
+    const suspensa = (e) => !!e && e.status === "suspended";
+
+    /* v2: a mesma listagem de antes, agora trazendo status, suspended_at e
+       suspension_reason. Empresas suspensas continuam aparecendo aqui —
+       quem as esconde é a resolução por domínio, no site público. */
     async function listarEmpresas() {
-        const { data, error } = await sb.rpc("superadmin_list_businesses");
+        const { data, error } = await sb.rpc("superadmin_list_businesses_v2");
         if (error) throw error;
         const linhas = Array.isArray(data) ? data : (data ? [data] : []);
         return linhas.map(normalizarEmpresa);
@@ -365,8 +378,11 @@
     function resumo() {
         const total = estado.empresas.length;
         const comResponsavel = estado.empresas.filter((e) => e.membros > 0).length;
+        const suspensas = estado.empresas.filter(suspensa).length;
         return {
             total: total,
+            ativas: total - suspensas,
+            suspensas: suspensas,
             comResponsavel: comResponsavel,
             semResponsavel: total - comResponsavel,
             comDominio: estado.empresas.filter((e) => !!e.dominio).length
@@ -386,6 +402,7 @@
 
     function render() {
         if ($("#tela-painel").hidden) return;
+        fecharMenu();                     // os botões âncora somem no redesenho
         const alvo = $("#conteudo");
         alvo.innerHTML = htmlAviso() + (estado.aba === "empresas" ? htmlEmpresas() : htmlVisao());
         if (estado.aba === "empresas") {
@@ -415,16 +432,18 @@
     function htmlCartoes() {
         if (estado.carregandoLista && !estado.empresas.length) {
             return '<div class="cartoes">' +
-                cartao("Empresas", "—") + cartao("Com responsável", "—") +
-                cartao("Sem responsável", "—") + cartao("Com domínio", "—") +
+                cartao("Empresas", "—") + cartao("Ativas", "—") +
+                cartao("Suspensas", "—") + cartao("Sem responsável", "—") +
                 "</div>";
         }
+        /* "Com domínio" saiu dos cartões para dar lugar a Ativas/Suspensas —
+           a informação continua inteira na coluna Domínio da lista. */
         const r = resumo();
         return '<div class="cartoes">' +
             cartao("Empresas", r.total, "destaque") +
-            cartao("Com responsável", r.comResponsavel, "boa") +
+            cartao("Ativas", r.ativas, "boa") +
+            cartao("Suspensas", r.suspensas, r.suspensas > 0 ? "suspensa" : "") +
             cartao("Sem responsável", r.semResponsavel, r.semResponsavel > 0 ? "atencao" : "") +
-            cartao("Com domínio", r.comDominio) +
             "</div>";
     }
 
@@ -527,15 +546,32 @@
             '<span class="valor-celula">' + conteudo + "</span></div>";
     }
 
+    /* Status em duas linhas no máximo: o selo e, só quando suspensa e só
+       quando existir, o motivo e a data. A tabela não engorda por isso. */
+    function celulaStatus(e) {
+        if (!suspensa(e)) {
+            return celula("Status", '<span class="selo-status ativa">Ativa</span>', "status");
+        }
+        const detalhe = [
+            e.motivoSuspensao ? esc(e.motivoSuspensao) : "",
+            e.suspensaEm ? "Suspensa em " + esc(formatarData(e.suspensaEm)) : ""
+        ].filter(Boolean);
+        return celula("Status",
+            '<span class="selo-status suspensa">Suspensa</span>' +
+            (detalhe.length ? '<span class="detalhe-status">' + detalhe.join(" · ") + "</span>" : ""),
+            "status");
+    }
+
     function linhaEmpresa(e) {
         const semDono = e.membros === 0;
-        return '<article class="linha-empresa">' +
+        return '<article class="linha-empresa' + (suspensa(e) ? " empresa-suspensa" : "") + '">' +
+            /* O slug acompanha o nome: com a coluna Status, oito colunas não
+               cabiam sem espremer tudo. Continua visível, logo abaixo. */
             '<div class="celula principal">' +
             '<div class="nome-empresa">' + esc(e.nome || "(sem nome)") + "</div>" +
+            '<div class="slug-empresa">' + (e.slug ? esc(e.slug) : "sem slug") + "</div>" +
             "</div>" +
-            celula("Slug", e.slug
-                ? '<span class="slug-empresa">' + esc(e.slug) + "</span>"
-                : '<span class="sem-dado">—</span>') +
+            celulaStatus(e) +
             celula("WhatsApp", e.whatsapp
                 ? esc(formatarWhats(e.whatsapp))
                 : '<span class="sem-dado">—</span>', "telefone") +
@@ -546,10 +582,17 @@
             celula("Domínio", e.dominio
                 ? esc(e.dominio)
                 : '<span class="sem-dado">Sem domínio</span>') +
-            '<div class="celula acoes' + (semDono ? "" : " vazia") + '">' +
+            '<div class="celula acoes">' +
             (semDono
                 ? '<button type="button" class="btn btn-principal btn-mini" data-convidar="' + esc(e.id) + '">Convidar responsável</button>'
                 : "") +
+            (suspensa(e)
+                ? '<button type="button" class="btn btn-secundario btn-mini" data-reativar="' + esc(e.id) + '">Reativar</button>'
+                : '<button type="button" class="btn btn-fantasma btn-mini" data-suspender="' + esc(e.id) + '">Suspender</button>') +
+            /* A exclusão não fica solta na tabela: mora atrás de "Mais
+               opções", longe do dedo que só queria suspender. */
+            '<button type="button" class="btn-mais" data-mais="' + esc(e.id) + '"' +
+            ' aria-label="Mais opções de ' + esc(e.nome || "empresa") + '">⋯</button>' +
             "</div>" +
             "</article>";
     }
@@ -605,7 +648,7 @@
 
         alvo.innerHTML = '<div class="tabela">' +
             '<div class="cabecalho-tabela" aria-hidden="true">' +
-            "<div>Empresa</div><div>Slug</div><div>WhatsApp</div>" +
+            "<div>Empresa</div><div>Status</div><div>WhatsApp</div>" +
             '<div class="direita">Produtos</div><div>Responsáveis</div>' +
             "<div>Domínio principal</div><div></div>" +
             "</div>" +
@@ -925,6 +968,222 @@
         setTimeout(function () { const c = $("#convite-email"); if (c) c.focus(); }, 320);
     }
 
+    /* ---------- 8.1 STATUS DA EMPRESA ----------------------------------
+       Suspender, reativar e excluir passam SEMPRE pelas RPCs protegidas.
+       Não existe `sb.from("businesses").update(...)` nem `.delete()` neste
+       arquivo: quem confere se quem chamou é super admin é o banco, em
+       is_platform_admin(), e nenhum botão escondido substitui isso.
+  
+       O id vem sempre do objeto devolvido por superadmin_list_businesses_v2
+       — nunca de algo digitado, nunca de um UUID escrito no código.
+       ------------------------------------------------------------------ */
+
+    async function definirStatus(businessId, status, motivo) {
+        if (!ehUuid(businessId)) throw new Error("Empresa inválida. Atualize a lista.");
+        const { error } = await sb.rpc("superadmin_set_business_status", {
+            p_business_id: businessId,
+            p_status: status,
+            p_reason: motivo || null
+        });
+        if (error) throw error;
+    }
+
+    function abrirSuspender(businessId) {
+        const empresa = empresaPorId(businessId);
+        if (!empresa) { toast("Empresa não encontrada. Atualize a lista.", "erro"); return; }
+        if (suspensa(empresa)) { toast("Esta empresa já está suspensa.", "atencao"); return; }
+
+        const corpo = "" +
+            '<p class="dica">A empresa <b>' + esc(empresa.nome || "(sem nome)") + "</b> ficará temporariamente " +
+            "sem acesso ao cardápio público e ao gerenciamento enquanto estiver suspensa.</p>" +
+            '<div class="aviso-info">Nenhum produto, configuração ou dado será apagado.</div>' +
+            '<div class="campo">' +
+            '<label for="motivo-suspensao">Motivo da suspensão <span class="opcional">OPCIONAL</span></label>' +
+            '<input id="motivo-suspensao" type="text" maxlength="180" autocomplete="off" placeholder="Pagamento em atraso">' +
+            '<p class="dica" style="margin-top:6px">Fica visível só aqui, na administração da plataforma.</p>' +
+            "</div>" +
+            '<p class="aviso-form" id="erro-form" hidden></p>';
+
+        const rodape =
+            '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
+            '<button type="button" class="btn btn-principal" id="btn-suspender">Suspender empresa</button>';
+
+        abrirFolha("Suspender empresa", corpo, rodape);
+
+        $("#btn-suspender").addEventListener("click", async function () {
+            const btn = this;
+            if (btn.disabled) return;
+            limparErroForm();
+            const motivo = $("#motivo-suspensao").value.trim();
+
+            ocupado(btn, true);
+            try {
+                await definirStatus(empresa.id, "suspended", motivo);
+                fecharFolha();
+                toast("Empresa suspensa.");
+                await recarregar();
+            } catch (e) {
+                /* nada de estado local fingindo que deu certo: o modal fica
+                   aberto, com o motivo preservado, para tentar de novo */
+                console.error("[superadmin]", e);
+                ocupado(btn, false);
+                erroNoForm(mensagemErro(e));
+            }
+        });
+
+        setTimeout(function () { const c = $("#motivo-suspensao"); if (c) c.focus(); }, 320);
+    }
+
+    function abrirReativar(businessId) {
+        const empresa = empresaPorId(businessId);
+        if (!empresa) { toast("Empresa não encontrada. Atualize a lista.", "erro"); return; }
+        if (!suspensa(empresa)) { toast("Esta empresa já está ativa.", "atencao"); return; }
+
+        const corpo =
+            '<p class="dica">Reativar <b>' + esc(empresa.nome || "(sem nome)") + "</b>?</p>" +
+            '<div class="aviso-info">O cardápio e o painel administrativo voltarão a funcionar. ' +
+            "Todos os dados existentes serão mantidos.</div>" +
+            (empresa.motivoSuspensao
+                ? '<p class="dica" style="margin-top:10px">Motivo registrado na suspensão: <b>' +
+                esc(empresa.motivoSuspensao) + "</b></p>"
+                : "") +
+            '<p class="aviso-form" id="erro-form" hidden></p>';
+
+        const rodape =
+            '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
+            '<button type="button" class="btn btn-principal" id="btn-reativar">Reativar empresa</button>';
+
+        abrirFolha("Reativar empresa", corpo, rodape);
+
+        $("#btn-reativar").addEventListener("click", async function () {
+            const btn = this;
+            if (btn.disabled) return;
+            limparErroForm();
+            ocupado(btn, true);
+            try {
+                /* motivo vai NULO: reativar limpa o registro da suspensão */
+                await definirStatus(empresa.id, "active", null);
+                fecharFolha();
+                toast("Empresa reativada.");
+                await recarregar();
+            } catch (e) {
+                console.error("[superadmin]", e);
+                ocupado(btn, false);
+                erroNoForm(mensagemErro(e));
+            }
+        });
+    }
+
+    /* Exclusão definitiva. O botão nasce desabilitado e só libera quando o
+       nome digitado é EXATAMENTE igual ao da empresa — a mesma string que
+       vai como p_confirm_name, para a RPC conferir do lado de lá também. */
+    function abrirExcluir(businessId) {
+        const empresa = empresaPorId(businessId);
+        if (!empresa) { toast("Empresa não encontrada. Atualize a lista.", "erro"); return; }
+        const nome = empresa.nome || "";
+
+        const corpo = "" +
+            '<p class="dica">Você está prestes a excluir <b>' + esc(nome || "(sem nome)") + "</b>.</p>" +
+            '<div class="aviso-perigo">' +
+            "<b>Esta ação não poderá ser desfeita.</b><br>" +
+            "Produtos, categorias, domínios, configurações e vínculos relacionados à empresa " +
+            "poderão ser removidos pelo banco.<br><br>" +
+            "A conta do usuário no Supabase Auth não será apagada automaticamente." +
+            "</div>" +
+            '<div class="campo">' +
+            '<label for="confirmar-nome">Para confirmar, digite exatamente:</label>' +
+            '<span class="nome-confirmar">' + esc(nome || "(sem nome)") + "</span>" +
+            '<input id="confirmar-nome" type="text" autocomplete="off" autocapitalize="none" ' +
+            'autocorrect="off" spellcheck="false" placeholder="Digite o nome da empresa" style="margin-top:10px">' +
+            "</div>" +
+            '<p class="aviso-form" id="erro-form" hidden></p>';
+
+        const rodape =
+            '<button type="button" class="btn btn-secundario" data-fechar>Cancelar</button>' +
+            '<button type="button" class="btn btn-perigo" id="btn-excluir" disabled>Excluir definitivamente</button>';
+
+        abrirFolha("Excluir empresa definitivamente", corpo, rodape);
+
+        const campo = $("#confirmar-nome");
+        const btn = $("#btn-excluir");
+
+        /* comparação exata: sem minúsculas, sem acento removido, sem "quase" */
+        const confere = () => { btn.disabled = campo.value.trim() !== nome; };
+        campo.addEventListener("input", confere);
+        confere();
+
+        btn.addEventListener("click", async function () {
+            if (btn.disabled) return;
+            limparErroForm();
+            const digitado = campo.value.trim();
+            if (digitado !== nome) { confere(); return; }
+
+            ocupado(btn, true);
+            try {
+                const { error } = await sb.rpc("superadmin_delete_business", {
+                    p_business_id: empresa.id,
+                    p_confirm_name: digitado
+                });
+                if (error) throw error;
+                fecharFolha();
+                toast("Empresa excluída.");
+                await recarregar();
+            } catch (e) {
+                console.error("[superadmin]", e);
+                ocupado(btn, false);
+                confere();
+                erroNoForm(mensagemErro(e));
+            }
+        });
+
+        setTimeout(function () { if (campo) campo.focus(); }, 320);
+    }
+
+    /* ---------- 8.2 MENU "MAIS OPÇÕES" ---------------------------------
+       Um menu por vez, preso ao botão que o abriu, fechado por clique fora,
+       Esc ou rolagem. É onde a exclusão vive. */
+    let menuAberto = null;
+
+    function fecharMenu() {
+        if (!menuAberto) return;
+        const { el, botao } = menuAberto;
+        menuAberto = null;
+        if (el && el.parentNode) el.parentNode.removeChild(el);
+        if (botao) botao.setAttribute("aria-expanded", "false");
+    }
+
+    function abrirMenu(botao, businessId) {
+        const empresa = empresaPorId(businessId);
+        if (!empresa) { toast("Empresa não encontrada. Atualize a lista.", "erro"); return; }
+        const jaEra = menuAberto && menuAberto.botao === botao;
+        fecharMenu();
+        if (jaEra) return;                      // clicar de novo fecha
+
+        const el = document.createElement("div");
+        el.className = "menu-acoes";
+        el.setAttribute("role", "menu");
+        el.innerHTML =
+            '<button type="button" role="menuitem" data-menu-status="' + esc(empresa.id) + '">' +
+            (suspensa(empresa) ? "Reativar empresa" : "Suspender empresa") +
+            "<small>" + (suspensa(empresa)
+                ? "Volta a funcionar imediatamente"
+                : "Tira do ar sem apagar nada") + "</small></button>" +
+            '<button type="button" role="menuitem" class="perigo" data-menu-excluir="' + esc(empresa.id) + '">' +
+            "Excluir empresa<small>Definitivo, sem desfazer</small></button>";
+
+        document.body.appendChild(el);
+        const r = botao.getBoundingClientRect();
+        const largura = el.offsetWidth;
+        /* ancora à direita do botão, e sobe se não houver espaço abaixo */
+        const esquerda = Math.max(8, Math.min(window.innerWidth - largura - 8, r.right - largura));
+        const abaixo = r.bottom + 6 + el.offsetHeight <= window.innerHeight - 8;
+        el.style.left = (esquerda + window.scrollX) + "px";
+        el.style.top = ((abaixo ? r.bottom + 6 : r.top - 6 - el.offsetHeight) + window.scrollY) + "px";
+
+        botao.setAttribute("aria-expanded", "true");
+        menuAberto = { el: el, botao: botao };
+    }
+
     /* ---------- 9. EVENTOS E INÍCIO ------------------------------------ */
 
     function ligarEventos() {
@@ -954,7 +1213,35 @@
             if (ev.target.closest("[data-fechar-aviso]")) { estado.aviso = null; render(); return; }
             const conv = ev.target.closest("[data-convidar]");
             if (conv) { abrirConvite(conv.dataset.convidar); return; }
+
+            /* status */
+            const sus = ev.target.closest("[data-suspender]");
+            if (sus) { fecharMenu(); abrirSuspender(sus.dataset.suspender); return; }
+            const rea = ev.target.closest("[data-reativar]");
+            if (rea) { fecharMenu(); abrirReativar(rea.dataset.reativar); return; }
+
+            /* mais opções */
+            const mais = ev.target.closest("[data-mais]");
+            if (mais) { abrirMenu(mais, mais.dataset.mais); return; }
+            const mStatus = ev.target.closest("[data-menu-status]");
+            if (mStatus) {
+                const id = mStatus.dataset.menuStatus;
+                fecharMenu();
+                const alvo = empresaPorId(id);
+                if (alvo && suspensa(alvo)) abrirReativar(id); else abrirSuspender(id);
+                return;
+            }
+            const mExcluir = ev.target.closest("[data-menu-excluir]");
+            if (mExcluir) { const id = mExcluir.dataset.menuExcluir; fecharMenu(); abrirExcluir(id); return; }
+
+            /* clique em qualquer outro lugar fecha o menu aberto */
+            fecharMenu();
         });
+
+        /* o menu é posicionado em coordenadas de tela: rolar a página o
+           deixaria solto no ar, então ele fecha */
+        window.addEventListener("scroll", fecharMenu, true);
+        window.addEventListener("resize", fecharMenu);
 
         /* A busca redesenha só a lista: redesenhar a tela inteira tiraria o
            foco do campo a cada tecla digitada. */
@@ -967,7 +1254,9 @@
 
         $("#cortina").addEventListener("click", fecharFolha);
         document.addEventListener("keydown", function (ev) {
-            if (ev.key === "Escape" && !$("#folha").hidden) fecharFolha();
+            if (ev.key !== "Escape") return;
+            if (menuAberto) { fecharMenu(); return; }
+            if (!$("#folha").hidden) fecharFolha();
         });
     }
 

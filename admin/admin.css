@@ -403,6 +403,36 @@ img {
   color: var(--tinta-3);
 }
 
+/* ---------- empresa suspensa ---------- */
+/* Mesmo cartão do login, em tom de aviso e não de erro: a casa não
+   errou nada, o acesso é que está pausado. */
+.selo-marca.bloqueado {
+  background: linear-gradient(160deg, #E3C98F, #C9A45C);
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.aviso-suspensao {
+  margin-top: 4px;
+  padding: 12px 14px;
+  border-radius: 11px;
+  background: var(--superficie-2);
+  color: var(--tinta-2);
+  font-size: 13.5px;
+  line-height: 1.55;
+  text-align: center;
+}
+
+#tela-suspensa .btn {
+  margin-top: 18px;
+}
+
+/* o título quebra em duas linhas neste cartão; 1.5 de entrelinha abria
+   um vão grande demais entre elas */
+#tela-suspensa h1 {
+  line-height: 1.15;
+}
+
 /* ---------- topo ---------- */
 .topo-admin {
   position: sticky;
